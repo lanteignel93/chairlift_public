@@ -5,9 +5,13 @@ description = "A machine-learning research pipeline in which the research protoc
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "click>=8.1",
     "numpy>=1.26",
     "polars>=1.21",
 ]
+
+[project.scripts]
+chairlift = "chairlift.run.cli:main"
 
 [dependency-groups]
 dev = [
@@ -28,6 +32,7 @@ target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "SIM", "RUF"]
+ignore = ["RUF001", "RUF002", "RUF003"]  # × − → are intentional in docs and output
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

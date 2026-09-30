@@ -11,6 +11,7 @@ fingerprint it is volatile and runs every time: the runner never assumes externa
 from __future__ import annotations
 
 import hashlib
+import time
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from graphlib import CycleError, TopologicalSorter
@@ -23,6 +24,7 @@ from chairlift.data.manifest import Manifest
 from chairlift.data.store import ArtifactStore
 
 Status = Literal["hit", "ran"]
+PlanStatus = Literal["hit", "run", "upstream"]  # upstream: an input will re-run; its bytes may or may not change
 
 
 @dataclass(frozen=True)
@@ -47,6 +49,15 @@ class StageResult:
     status: Status
     key: str
     output: str
+    reason: str
+    seconds: float = 0.0
+
+
+@dataclass
+class PlanItem:
+    stage: str
+    status: PlanStatus
+    key: str | None
     reason: str
 
 
@@ -90,6 +101,38 @@ class Pipeline:
                 stack.extend(self.stages[n].inputs)
         return [n for n in self.order if n in need]
 
+    def _decide(self, stage: Stage, key: str) -> tuple[bool, str, str | None]:
+        """(reuse?, why, stored output) — the one rule both run() and plan() apply."""
+        rec = self.manifest.lookup(key)
+        if not stage.inputs and stage.fingerprint is None:
+            return False, "source stage without a fingerprint: always runs", None
+        if rec is None:
+            return False, "no record for this key (new, or an input / spec / version changed)", None
+        if not self.store.has(rec.output):
+            return False, "record exists but its output is missing from the store", None
+        return True, "inputs, spec and version unchanged", rec.output
+
+    def plan(self, targets: Iterable[str] | None = None) -> list[PlanItem]:
+        """What run() would do, without running anything.
+
+        A stage downstream of one that will re-run cannot be decided in advance: if the re-run produces identical
+        bytes (content addressing), the downstream key is unchanged and it will be a hit. It is reported as `upstream`.
+        """
+        items: list[PlanItem] = []
+        refs: dict[str, str] = {}
+        for name in self._needed(targets):
+            stage = self.stages[name]
+            pending = [i for i in stage.inputs if i not in refs]
+            if pending:
+                items.append(PlanItem(name, "upstream", None, f"waits on re-running input(s): {', '.join(pending)}"))
+                continue
+            key = stage.key({i: refs[i] for i in stage.inputs})
+            reuse, why, out = self._decide(stage, key)
+            if reuse and out is not None:
+                refs[name] = out
+            items.append(PlanItem(name, "hit" if reuse else "run", key, why))
+        return items
+
     def run(self, targets: Iterable[str] | None = None, reason: str = "") -> RunReport:
         report = RunReport()
         refs: dict[str, str] = {}
@@ -97,21 +140,16 @@ class Pipeline:
             stage = self.stages[name]
             input_refs = {i: refs[i] for i in stage.inputs}
             key = stage.key(input_refs)
-            rec = self.manifest.lookup(key)
-            volatile = not stage.inputs and stage.fingerprint is None
-            if rec is not None and not volatile and self.store.has(rec.output):
-                refs[name] = rec.output
-                report.results[name] = StageResult(name, "hit", key, rec.output, "inputs, spec and version unchanged")
+            reuse, why, out = self._decide(stage, key)
+            if reuse and out is not None:
+                refs[name] = out
+                report.results[name] = StageResult(name, "hit", key, out, why)
                 continue
-            if volatile:
-                why = "source stage without a fingerprint: always runs"
-            elif rec is None:
-                why = "no record for this key (new, or an input / spec / version changed)"
-            else:
-                why = "record exists but its output is missing from the store"
+            t0 = time.perf_counter()
             kwargs = {i: self.store.get(refs[i]) for i in stage.inputs}
-            out = stage.fn(**kwargs) if stage.spec is None else stage.fn(stage.spec, **kwargs)
-            ref = self.store.put(out)
+            result = stage.fn(**kwargs) if stage.spec is None else stage.fn(stage.spec, **kwargs)
+            ref = self.store.put(result)
+            seconds = time.perf_counter() - t0
             self.manifest.append(
                 stage=name,
                 key=key,
@@ -123,7 +161,7 @@ class Pipeline:
                 reason=reason or why,
             )
             refs[name] = ref
-            report.results[name] = StageResult(name, "ran", key, ref, why)
+            report.results[name] = StageResult(name, "ran", key, ref, why, seconds)
         return report
 
     def load(self, name: str, report: RunReport) -> Any:

@@ -26,6 +26,10 @@ uv sync                                   # env from uv.lock (Python 3.12)
 uv run pytest                             # full suite, walkthroughs included
 uv run ruff check . && uv run ruff format --check .
 uv run python debug_walkthroughs/wt_manifest.py --pdb
+uv run chairlift run  chairlift.verify.toy:pipeline --root runs/toy --reason "why"
+uv run chairlift plan chairlift.verify.toy:pipeline --root runs/toy --set window=5   # dry run
+uv run chairlift show chairlift.verify.toy:pipeline report --root runs/toy
+uv run chairlift log  --root runs/toy --stage fit
 ```
 
 Set `UV_LINK_MODE=copy` on this box (the uv cache is on another filesystem).

@@ -9,4 +9,6 @@ Status: early development (milestone 0). See [docs/README.md](docs/README.md) an
 ```bash
 uv sync
 uv run pytest
+uv run chairlift run chairlift.verify.toy:pipeline --root runs/toy
+uv run chairlift plan chairlift.verify.toy:pipeline --root runs/toy --set window=5
 ```

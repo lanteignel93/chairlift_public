@@ -24,3 +24,9 @@ a change. A stage with the same key as before and status `hit` did not run.
 
 `hit`: the manifest held the key and the store held the object; the stage function was not called. `ran`: the stage
 executed; `StageResult.reason` says why.
+
+## `chairlift plan`
+
+`hit`: would be reused. `run`: will execute (the reason says why). `upstream`: an input will re-run first; if it
+produces the same bytes this stage becomes a hit, otherwise it runs — the plan cannot know before the input runs.
+`chairlift run` prints the same columns plus the seconds each executed stage took.

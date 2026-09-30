@@ -58,3 +58,14 @@ are written with sorted keys. A polars upgrade may change parquet bytes for iden
 the safe direction. Cross-version equality is tested on contents (golden tests), never on hashes. The manifest is an
 append-only JSON-lines file: a later record for a key supersedes an earlier one, and a record whose object is missing
 from the store is a miss, never a skip.
+
+## 2026-09-30 — CLI on click; studies are `module:factory` references
+
+`chairlift run | plan | show | log` (`run/cli.py`, entry point `chairlift`). A study is any callable
+`factory(root, **params) -> Pipeline`, referenced as `package.module:factory` or `path/to/file.py:factory`; `--set
+name=value` passes parameters (JSON-parsed when possible). The CLI holds no pipeline logic: `plan` and `run` share one
+decision rule (`Pipeline._decide`), so a dry run cannot disagree with a run. `plan` reports a stage downstream of a
+re-running stage as `upstream` rather than guessing, because content addressing may turn it into a hit. Chosen: click
+(Laurent's request; mature, composable groups, `CliRunner` for tests). Rejected: argparse (verbose for grouped
+commands), a study registry or config-file discovery (a reference is explicit and works for studies living in other
+repositories).
