@@ -1,0 +1,110 @@
+"""Specs: frozen dataclasses whose canonical JSON is their identity.
+
+A spec's hash is what the manifest keys a stage on and what the ledger records, so two specs that describe the same
+thing must hash equal and any change must change the hash. Identity is the declared (name, version) plus the field
+values; the Python module path is not part of it, so moving a class between modules does not invalidate caches.
+Containers are frozen at construction (list → tuple, dict → read-only mapping, set → frozenset): a spec that could be
+mutated after hashing would let the cache drift from the object.
+"""
+
+from __future__ import annotations
+
+import dataclasses
+import datetime as dt
+import enum
+import hashlib
+import json
+import math
+from collections.abc import Callable, Mapping
+from types import MappingProxyType
+from typing import Any, TypeVar
+
+T = TypeVar("T")
+
+
+class SpecError(TypeError):
+    """A value that cannot be part of a spec's identity."""
+
+
+def _freeze(value: Any) -> Any:
+    if isinstance(value, list | tuple):
+        return tuple(_freeze(v) for v in value)
+    if isinstance(value, set | frozenset):
+        return frozenset(_freeze(v) for v in value)
+    if isinstance(value, Mapping):
+        return MappingProxyType({k: _freeze(v) for k, v in value.items()})
+    return value
+
+
+def spec(*, name: str | None = None, version: int = 1) -> Callable[[type[T]], type[T]]:
+    """Declare a frozen, keyword-only spec dataclass with an explicit identity.
+
+    Bump `version` whenever the meaning of the spec changes without its fields changing (the code behind it
+    computes something different): the hash changes, and every cached result built from the old meaning is rebuilt.
+    """
+
+    def wrap(cls: type[T]) -> type[T]:
+        original_post_init = getattr(cls, "__post_init__", None)
+
+        def __post_init__(self: Any) -> None:
+            for f in dataclasses.fields(self):
+                object.__setattr__(self, f.name, _freeze(getattr(self, f.name)))
+            if original_post_init is not None:
+                original_post_init(self)
+
+        cls.__post_init__ = __post_init__  # type: ignore[attr-defined]
+        dc = dataclasses.dataclass(frozen=True, kw_only=True)(cls)
+        dc.__spec_name__ = name or cls.__qualname__  # type: ignore[attr-defined]
+        dc.__spec_version__ = version  # type: ignore[attr-defined]
+        return dc
+
+    return wrap
+
+
+def is_spec(obj: Any) -> bool:
+    return dataclasses.is_dataclass(obj) and hasattr(type(obj), "__spec_version__")
+
+
+def canonical(obj: Any) -> Any:
+    """Convert a value to a JSON structure that is identical for equal values and different otherwise."""
+    if obj is None or isinstance(obj, bool | str):
+        return obj
+    if isinstance(obj, enum.Enum):  # before int: IntEnum is an int
+        return {"__enum__": type(obj).__qualname__, "value": canonical(obj.value)}
+    if isinstance(obj, int):
+        return obj
+    if isinstance(obj, float):
+        if not math.isfinite(obj):
+            raise SpecError(f"non-finite float {obj!r} cannot be part of a spec")
+        return 0.0 if obj == 0.0 else obj  # -0.0 and 0.0 are the same parameter
+    if is_spec(obj):
+        cls = type(obj)
+        body = {f.name: canonical(getattr(obj, f.name)) for f in dataclasses.fields(obj)}
+        return {"__spec__": cls.__spec_name__, "__version__": cls.__spec_version__, **body}
+    if dataclasses.is_dataclass(obj) and not isinstance(obj, type):
+        raise SpecError(f"{type(obj).__qualname__} is a dataclass but not a @spec; declare it with @spec")
+    if isinstance(obj, dt.datetime):
+        return {"__datetime__": obj.isoformat()}
+    if isinstance(obj, dt.date):
+        return {"__date__": obj.isoformat()}
+    if isinstance(obj, dt.timedelta):
+        return {"__timedelta__": obj.total_seconds()}
+    if isinstance(obj, tuple | list):
+        return [canonical(v) for v in obj]
+    if isinstance(obj, set | frozenset):
+        items = [canonical(v) for v in obj]
+        return {"__set__": sorted(items, key=lambda v: json.dumps(v, sort_keys=True))}
+    if isinstance(obj, Mapping):
+        if not all(isinstance(k, str) for k in obj):
+            raise SpecError("spec mappings need string keys")
+        return {"__map__": {k: canonical(obj[k]) for k in sorted(obj)}}
+    raise SpecError(f"{type(obj).__qualname__} cannot be part of a spec's identity")
+
+
+def canonical_json(obj: Any) -> str:
+    return json.dumps(canonical(obj), sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False)
+
+
+def spec_hash(obj: Any) -> str:
+    """sha256 of the canonical JSON: the value's identity in the manifest and the ledger."""
+    return hashlib.sha256(canonical_json(obj).encode()).hexdigest()
