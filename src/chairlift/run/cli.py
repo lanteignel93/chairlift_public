@@ -16,11 +16,11 @@ from typing import Any
 
 import click
 import polars as pl
+from rich.console import Console
+from rich.table import Table
 
 from chairlift.data.manifest import Manifest
 from chairlift.run.dag import Pipeline
-
-_COLOUR = {"hit": "bright_black", "ran": "green", "run": "yellow", "upstream": "cyan"}
 
 
 def _load_factory(ref: str) -> Any:
@@ -71,8 +71,19 @@ def _build(study: str, root: Path, sets: tuple[str, ...]) -> Pipeline:
     return pipe
 
 
-def _status(s: str) -> str:
-    return click.style(f"{s:8s}", fg=_COLOUR.get(s))
+_RICH = {"hit": "dim", "ran": "green", "run": "yellow", "upstream": "cyan"}
+
+
+def _console() -> Console:
+    # sys.stdout read at call time, so CliRunner captures it; rich colours only when it is a terminal
+    return Console(file=sys.stdout, highlight=False, soft_wrap=False)
+
+
+def _table(*columns: str) -> Table:
+    t = Table(box=None, pad_edge=False, header_style="bold")
+    for c in columns:
+        t.add_column(c, no_wrap=c != "reason", overflow="fold")
+    return t
 
 
 study_arg = click.argument("study")
@@ -104,11 +115,14 @@ def run(study: str, root: Path, sets: tuple[str, ...], targets: tuple[str, ...],
     if as_json:
         click.echo(json.dumps([r.__dict__ for r in report.results.values()], indent=1))
         return
+    t = _table("stage", "status", "key", "seconds", "reason")
     for r in report.results.values():
-        took = f"{r.seconds:7.2f}s" if r.status == "ran" else " " * 8
-        click.echo(f"{r.stage:14s} {_status(r.status)} {r.key[:12]}  {took}  {r.reason}")
+        took = f"{r.seconds:.2f}" if r.status == "ran" else ""
+        t.add_row(r.stage, f"[{_RICH[r.status]}]{r.status}[/]", r.key[:12], took, r.reason)
+    con = _console()
+    con.print(t)
     ran = report.ran()
-    click.echo(f"\n{len(ran)} ran, {len(report.results) - len(ran)} reused · root {root}")
+    con.print(f"\n{len(ran)} ran, {len(report.results) - len(ran)} reused · root {root}")
 
 
 @main.command()
@@ -123,8 +137,10 @@ def plan(study: str, root: Path, sets: tuple[str, ...], targets: tuple[str, ...]
     if as_json:
         click.echo(json.dumps([i.__dict__ for i in items], indent=1))
         return
+    t = _table("stage", "status", "key", "reason")
     for i in items:
-        click.echo(f"{i.stage:14s} {_status(i.status)} {(i.key or '')[:12]:12s}  {i.reason}")
+        t.add_row(i.stage, f"[{_RICH[i.status]}]{i.status}[/]", (i.key or "")[:12], i.reason)
+    _console().print(t)
 
 
 @main.command()
@@ -165,8 +181,9 @@ def log(root: Path, stage: str | None, last: int, as_json: bool) -> None:
     if as_json:
         click.echo(json.dumps(lines, indent=1))
         return
+    t = _table("built_at", "stage", "v", "output", "code", "reason")
     for r in lines:
-        click.echo(
-            f"{r['built_at']}  {r['stage']:14s} v{r['version']}  {r['output'][:20]}…  {r['code']}  {r['reason']}"
-        )
-    click.echo(f"\n{len(Manifest(path).records())} keys in the manifest")
+        t.add_row(r["built_at"], r["stage"], str(r["version"]), r["output"][:20] + "…", r["code"], r["reason"])
+    con = _console()
+    con.print(t)
+    con.print(f"\n{len(Manifest(path).records())} keys in the manifest")

@@ -1,0 +1,5 @@
+[files]
+extend-exclude = ["uv.lock", "tests/__snapshots__/**"]
+
+[default.extend-words]
+TPE = "TPE"  # Tree-structured Parzen Estimator (Optuna's sampler)

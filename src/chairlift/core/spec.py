@@ -17,7 +17,7 @@ import json
 import math
 from collections.abc import Callable, Mapping
 from types import MappingProxyType
-from typing import Any, TypeVar
+from typing import Any, TypeVar, cast, dataclass_transform
 
 T = TypeVar("T")
 
@@ -28,14 +28,16 @@ class SpecError(TypeError):
 
 def _freeze(value: Any) -> Any:
     if isinstance(value, list | tuple):
-        return tuple(_freeze(v) for v in value)
+        return tuple(_freeze(v) for v in cast("tuple[Any, ...]", value))
     if isinstance(value, set | frozenset):
-        return frozenset(_freeze(v) for v in value)
+        return frozenset(_freeze(v) for v in cast("frozenset[Any]", value))
     if isinstance(value, Mapping):
-        return MappingProxyType({k: _freeze(v) for k, v in value.items()})
+        items = cast("Mapping[Any, Any]", value)
+        return MappingProxyType({k: _freeze(v) for k, v in items.items()})
     return value
 
 
+@dataclass_transform(kw_only_default=True, frozen_default=True)
 def spec(*, name: str | None = None, version: int = 1) -> Callable[[type[T]], type[T]]:
     """Declare a frozen, keyword-only spec dataclass with an explicit identity.
 
@@ -52,7 +54,7 @@ def spec(*, name: str | None = None, version: int = 1) -> Callable[[type[T]], ty
             if original_post_init is not None:
                 original_post_init(self)
 
-        cls.__post_init__ = __post_init__  # type: ignore[attr-defined]
+        setattr(cls, "__post_init__", __post_init__)  # noqa: B010  # wraps any user __post_init__
         dc = dataclasses.dataclass(frozen=True, kw_only=True)(cls)
         dc.__spec_name__ = name or cls.__qualname__  # type: ignore[attr-defined]
         dc.__spec_version__ = version  # type: ignore[attr-defined]
@@ -78,9 +80,9 @@ def canonical(obj: Any) -> Any:
             raise SpecError(f"non-finite float {obj!r} cannot be part of a spec")
         return 0.0 if obj == 0.0 else obj  # -0.0 and 0.0 are the same parameter
     if is_spec(obj):
-        cls = type(obj)
+        cls = cast(Any, type(obj))
         body = {f.name: canonical(getattr(obj, f.name)) for f in dataclasses.fields(obj)}
-        return {"__spec__": cls.__spec_name__, "__version__": cls.__spec_version__, **body}
+        return {"__spec__": str(cls.__spec_name__), "__version__": int(cls.__spec_version__), **body}
     if dataclasses.is_dataclass(obj) and not isinstance(obj, type):
         raise SpecError(f"{type(obj).__qualname__} is a dataclass but not a @spec; declare it with @spec")
     if isinstance(obj, dt.datetime):
@@ -90,14 +92,18 @@ def canonical(obj: Any) -> Any:
     if isinstance(obj, dt.timedelta):
         return {"__timedelta__": obj.total_seconds()}
     if isinstance(obj, tuple | list):
-        return [canonical(v) for v in obj]
+        return [canonical(v) for v in cast("tuple[Any, ...]", obj)]
     if isinstance(obj, set | frozenset):
-        items = [canonical(v) for v in obj]
+        items = [canonical(v) for v in cast("frozenset[Any]", obj)]
         return {"__set__": sorted(items, key=lambda v: json.dumps(v, sort_keys=True))}
     if isinstance(obj, Mapping):
-        if not all(isinstance(k, str) for k in obj):
-            raise SpecError("spec mappings need string keys")
-        return {"__map__": {k: canonical(obj[k]) for k in sorted(obj)}}
+        mapping = cast("Mapping[Any, Any]", obj)
+        keys: list[str] = []
+        for k in mapping:
+            if not isinstance(k, str):
+                raise SpecError("spec mappings need string keys")
+            keys.append(k)
+        return {"__map__": {k: canonical(mapping[k]) for k in sorted(keys)}}
     raise SpecError(f"{type(obj).__qualname__} cannot be part of a spec's identity")
 
 

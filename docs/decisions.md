@@ -69,3 +69,24 @@ re-running stage as `upstream` rather than guessing, because content addressing 
 (Laurent's request; mature, composable groups, `CliRunner` for tests). Rejected: argparse (verbose for grouped
 commands), a study registry or config-file discovery (a reference is explicit and works for studies living in other
 repositories).
+
+## 2026-09-30 — Tooling batch: strict types, property and golden tests, prek
+
+- **Types:** basedpyright strict on `src/` (standard on tests and walkthroughs) is the blocking checker; ty (Astral,
+  beta) runs in CI as a non-blocking job. Strict mode found that type checkers did not see `@spec` classes as
+  dataclasses (constructors untyped); `spec` is now declared with PEP 681 `dataclass_transform(kw_only_default=True,
+  frozen_default=True)`, so every spec constructor is fully typed. Rejected: mypy (no plugin we need).
+- **Property tests (hypothesis):** spec hashing (mapping-order invariance, determinism, freezing, single-value
+  sensitivity) and the rebuild rule on random DAGs (a version bump re-runs exactly its descendants when outputs carry
+  their inputs; a third build reuses everything).
+- **Golden test (syrupy):** the toy study's outputs are snapshotted by content in `tests/__snapshots__/`; a change is
+  either intended (`--snapshot-update`, reason in the commit) or a silent change in what the pipeline computes.
+- **Build backend:** `uv_build` (uv's own, stable for pure-Python). polars pinned `<2` until the 2.0 release is
+  assessed. Dependency groups (PEP 735) for dev tools.
+- **Hooks:** prek (Rust drop-in for pre-commit, same config) runs ruff, basedpyright and typos on commit and pytest on
+  push. Replaces the bash hook. Dependabot watches uv and GitHub Actions weekly.
+- **CLI output:** rich tables for `run`, `plan`, `log`; colour only on a terminal.
+- **Coverage:** branch coverage on every test run. pytest-xdist installed but opt-in (`-n 4`): `-n auto` on this
+  256-core box made the suite slower (31 s vs 1 s).
+- **Deferred:** PEP 723 inline metadata for walkthroughs (they import the local package, which inline metadata cannot
+  express without a path source); dataframely frame contracts arrive with the first protocol that returns a frame.

@@ -1,5 +1,6 @@
 import datetime as dt
 import enum
+from typing import Any
 
 import pytest
 
@@ -25,8 +26,8 @@ class Side(enum.Enum):
     SHORT = "short"
 
 
-def m(**kw):
-    base = dict(family="ridge", params={"alpha": 1e-3, "fit_intercept": True}, window=Window(months=48))
+def m(**kw: Any) -> Model:
+    base: dict[str, Any] = dict(family="ridge", params={"alpha": 1e-3, "fit_intercept": True}, window=Window(months=48))
     return Model(**(base | kw))
 
 
@@ -68,7 +69,7 @@ def test_containers_are_frozen_at_construction():
     with pytest.raises(TypeError):
         s.params["alpha"] = 2.0  # read-only mapping: the hash cannot drift from the object
     with pytest.raises(AttributeError):
-        s.family = "gbm"  # frozen dataclass
+        s.family = "gbm"  # pyright: ignore[reportAttributeAccessIssue]  # ty: ignore[invalid-assignment]
 
 
 def test_list_and_tuple_hash_the_same():

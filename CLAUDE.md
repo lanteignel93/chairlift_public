@@ -25,6 +25,9 @@ clients: slalom (cross-sectional, the golden reference) and VXX (time series, th
 uv sync                                   # env from uv.lock (Python 3.12)
 uv run pytest                             # full suite, walkthroughs included
 uv run ruff check . && uv run ruff format --check .
+uv run basedpyright                       # strict on src/ (blocking); `uv run ty check` is advisory
+uv run prek run --all-files               # every hook; `uv run prek install` once per clone
+uv run pytest --snapshot-update           # only when a golden change is intended — say why in the commit
 uv run python debug_walkthroughs/wt_manifest.py --pdb
 uv run chairlift run  chairlift.verify.toy:pipeline --root runs/toy --reason "why"
 uv run chairlift plan chairlift.verify.toy:pipeline --root runs/toy --set window=5   # dry run

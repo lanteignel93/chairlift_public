@@ -14,12 +14,19 @@ with toy studies built on them).
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any, TypedDict
 
 import numpy as np
 import polars as pl
 
 from chairlift.core.spec import spec
 from chairlift.run.dag import Pipeline, Stage
+
+
+class Fold(TypedDict):
+    train_end: int
+    test_start: int
+    test_end: int
 
 
 @spec(name="ToySources")
@@ -65,9 +72,9 @@ def features(s: FeatureSpec, sources: pl.DataFrame) -> pl.DataFrame:
     )
 
 
-def folds(s: FoldSpec, sources: pl.DataFrame) -> dict:
-    last = int(sources["t0"].max())
-    out = []
+def folds(s: FoldSpec, sources: pl.DataFrame) -> dict[str, list[Fold]]:
+    last = int(sources["t0"].to_numpy().max())
+    out: list[Fold] = []
     start = s.first_test
     while start <= last:
         out.append(
@@ -81,18 +88,18 @@ def dataset(features: pl.DataFrame, sources: pl.DataFrame) -> pl.DataFrame:
     return features.join(sources.select("entity", "t0", "y"), on=["entity", "t0"])
 
 
-def fit(dataset: pl.DataFrame, folds: dict) -> pl.DataFrame:
-    preds = []
-    for i, fo in enumerate(folds["folds"]):
-        train = dataset.filter(pl.col("t0") <= fo["train_end"])
-        test = dataset.filter(pl.col("t0").is_between(fo["test_start"], fo["test_end"]))
+def fit(dataset: pl.DataFrame, folds: dict[str, list[Fold]]) -> pl.DataFrame:
+    preds: list[pl.DataFrame] = []
+    for i, fold in enumerate(folds["folds"]):
+        train = dataset.filter(pl.col("t0") <= fold["train_end"])
+        test = dataset.filter(pl.col("t0").is_between(fold["test_start"], fold["test_end"]))
         f, y = train["f"].to_numpy(), train["y"].to_numpy()
         slope = float((f * y).sum() / (f * f).sum())
         preds.append(test.select("entity", "t0", "y", (pl.col("f") * slope).alias("pred")).with_columns(fold=pl.lit(i)))
     return pl.concat(preds)
 
 
-def evaluate(fit: pl.DataFrame) -> dict:
+def evaluate(fit: pl.DataFrame) -> dict[str, Any]:
     ic = (
         fit.group_by("t0")
         .agg(pl.corr("pred", "y", method="spearman").alias("ic"))
@@ -104,7 +111,7 @@ def evaluate(fit: pl.DataFrame) -> dict:
     return {"days": len(ic), "ic_mean": round(mean, 4), "ic_t": round(mean / sd * np.sqrt(len(ic)), 2)}
 
 
-def report(evaluate: dict) -> dict:
+def report(evaluate: dict[str, Any]) -> dict[str, str]:
     return {"line": f"OOS IC {evaluate['ic_mean']:+.4f} (t = {evaluate['ic_t']:+.2f}) over {evaluate['days']} days"}
 
 

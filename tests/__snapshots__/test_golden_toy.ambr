@@ -1,0 +1,90 @@
+# serializer version: 1
+# name: test_toy_outputs_match_the_golden_snapshot[evaluate]
+  dict({
+    'days': 150,
+    'ic_mean': 0.1072,
+    'ic_t': 10.07,
+  })
+# ---
+# name: test_toy_outputs_match_the_golden_snapshot[fit]
+  dict({
+    'columns': list([
+      'entity',
+      't0',
+      'y',
+      'pred',
+      'fold',
+    ]),
+    'head': list([
+      dict({
+        'entity': 0,
+        'fold': 0,
+        'pred': 0.0011606856,
+        't0': 150,
+        'y': -1.0213675843,
+      }),
+      dict({
+        'entity': 1,
+        'fold': 0,
+        'pred': 0.0147949406,
+        't0': 150,
+        'y': 0.0709635666,
+      }),
+      dict({
+        'entity': 2,
+        'fold': 0,
+        'pred': -0.0442842208,
+        't0': 150,
+        'y': 0.1116930427,
+      }),
+      dict({
+        'entity': 3,
+        'fold': 0,
+        'pred': 0.0523460189,
+        't0': 150,
+        'y': 1.1102189833,
+      }),
+      dict({
+        'entity': 4,
+        'fold': 0,
+        'pred': 0.1388201261,
+        't0': 150,
+        'y': -1.0044078868,
+      }),
+    ]),
+    'shape': list([
+      7500,
+      5,
+    ]),
+    'sums': dict({
+      'pred': 4.90007752,
+      'y': 33.19066983,
+    }),
+  })
+# ---
+# name: test_toy_outputs_match_the_golden_snapshot[folds]
+  dict({
+    'folds': list([
+      dict({
+        'test_end': 199,
+        'test_start': 150,
+        'train_end': 144,
+      }),
+      dict({
+        'test_end': 249,
+        'test_start': 200,
+        'train_end': 194,
+      }),
+      dict({
+        'test_end': 299,
+        'test_start': 250,
+        'train_end': 244,
+      }),
+    ]),
+  })
+# ---
+# name: test_toy_outputs_match_the_golden_snapshot[report]
+  dict({
+    'line': 'OOS IC +0.1072 (t = +10.07) over 150 days',
+  })
+# ---

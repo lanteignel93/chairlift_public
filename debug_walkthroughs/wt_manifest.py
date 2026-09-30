@@ -23,6 +23,7 @@ from __future__ import annotations
 import sys
 import tempfile
 from pathlib import Path
+from typing import cast
 
 import polars as pl
 
@@ -66,7 +67,7 @@ def dataset(features: pl.DataFrame) -> pl.DataFrame:
 
 def report(dataset: pl.DataFrame, folds: dict) -> dict:
     CALLS.append("report")
-    return {"mean_f": round(float(dataset["f"].mean()), 6), "first_test": folds["first_test"]}
+    return {"mean_f": round(cast(float, dataset["f"].mean()), 6), "first_test": folds["first_test"]}
 
 
 def pipeline(root: Path, window: int) -> Pipeline:

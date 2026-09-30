@@ -10,3 +10,6 @@ build/
 # run roots (stores and manifests) never go in git
 /runs/
 /data/
+.coverage
+.coverage.*
+.hypothesis/

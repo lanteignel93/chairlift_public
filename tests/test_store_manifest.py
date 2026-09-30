@@ -1,3 +1,5 @@
+from typing import Any
+
 import polars as pl
 import pytest
 
@@ -48,7 +50,7 @@ def test_missing_object_raises(tmp_path):
 def test_manifest_persists_and_later_records_supersede(tmp_path):
     path = tmp_path / "manifest.jsonl"
     m = Manifest(path)
-    common = dict(stage="s", version=1, spec_hash="h", inputs={"b": "x", "a": "y"}, code="c")
+    common: dict[str, Any] = dict(stage="s", version=1, spec_hash="h", inputs={"b": "x", "a": "y"}, code="c")
     m.append(key="k1", output="json:" + "0" * 64, reason="first", **common)
     m.append(key="k1", output="json:" + "1" * 64, reason="rebuilt", **common)
     again = Manifest(path)
