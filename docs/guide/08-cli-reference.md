@@ -25,6 +25,7 @@ Conventions shared by most commands:
 - [`chairlift run`](#chairlift-run)
 - [`chairlift runs`](#chairlift-runs)
 - [`chairlift runs show`](#chairlift-runs-show)
+- [`chairlift search`](#chairlift-search)
 - [`chairlift show`](#chairlift-show)
 - [`chairlift signature`](#chairlift-signature)
 - [`chairlift status`](#chairlift-status)
@@ -255,6 +256,25 @@ chairlift runs show [OPTIONS] RUN
 ```
 
 Print a run record by run id or signature prefix (the newest match).
+
+<a id="chairlift-search"></a>
+
+## `chairlift search`
+
+```
+chairlift search [OPTIONS] EXPERIMENT
+```
+
+Run every candidate of an experiment's [search] and judge the search itself: deflated Sharpe of the best,
+walk-forward selection (no hindsight), probability of backtest overfitting, robustness without the best days.
+
+| option | meaning |
+|---|---|
+| `--root PATH` | A self-contained run directory (own store). Default: &lt;paths.home&gt;/studies/&lt;name&gt;, shared store. |
+| `--name TEXT` | Study name (default: the module's STUDY_NAME). |
+| `--reason TEXT` | Why this search (default: the file's reason). |
+| `--dry-run` | List the candidates; run nothing. |
+| `--json` | Machine-readable output. |
 
 <a id="chairlift-show"></a>
 

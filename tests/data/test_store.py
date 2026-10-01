@@ -121,3 +121,11 @@ def test_a_non_json_output_names_the_offending_path(tmp_path: Path):
 
     with pytest.raises(TypeError, match=r"\$\.ls\.corr = nan"):
         ArtifactStore(tmp_path).put({"ls": {"sharpe": 1.0, "corr": float("nan")}})
+
+
+def test_equal_frames_with_different_chunking_have_one_address(tmp_path: Path):
+    a = pl.DataFrame({"x": list(range(1000)), "s": [str(i) for i in range(1000)]})
+    b = pl.concat([a.head(300), a.slice(300, 400), a.tail(300)], rechunk=False)
+    assert b.n_chunks() > 1 and a.equals(b)
+    store = ArtifactStore(tmp_path)
+    assert store.put(a) == store.put(b)

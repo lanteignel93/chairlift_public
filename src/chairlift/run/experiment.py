@@ -32,7 +32,7 @@ from typing import Any, cast, get_type_hints
 
 import msgspec
 
-TOP = {"study", "name", "reason", "study_name", "params", "run", "sweep"}
+TOP = {"study", "name", "reason", "study_name", "params", "run", "sweep", "search"}
 RUN = {"targets"}
 
 
@@ -51,6 +51,7 @@ class Experiment:
     params: dict[str, Any] = field(default_factory=dict[str, Any])
     targets: tuple[str, ...] | None = None
     sweep: dict[str, tuple[Any, ...]] = field(default_factory=dict[str, tuple[Any, ...]])
+    search: dict[str, Any] = field(default_factory=dict[str, Any])  # [search]: chairlift.search.space
 
     def digest(self) -> str:
         return hashlib.sha256(self.text.encode()).hexdigest()
@@ -117,6 +118,7 @@ def load_experiment(path: Path | str) -> Experiment:
         params=params,
         targets=tuple(cast("list[str]", targets)) if targets is not None else None,
         sweep=sweep,
+        search=_table(raw, "search", path),
     )
 
 

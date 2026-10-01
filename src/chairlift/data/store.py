@@ -28,7 +28,8 @@ class MissingArtifact(FileNotFoundError):
 def _encode(obj: Any) -> tuple[bytes, str]:
     if isinstance(obj, pl.DataFrame):
         buf = io.BytesIO()
-        obj.write_parquet(buf, compression="zstd", compression_level=3, statistics=False)
+        # rechunk: equal frames assembled differently (a concat of worker results) must encode to equal bytes
+        obj.rechunk().write_parquet(buf, compression="zstd", compression_level=3, statistics=False)
         return buf.getvalue(), "parquet"
     try:  # plain, sorted JSON: the value must read back as itself (tuples come back as lists)
         text = json.dumps(obj, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False)

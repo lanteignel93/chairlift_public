@@ -447,6 +447,100 @@ def sweep(
 
 
 @main.command()
+@click.argument("experiment", type=click.Path(exists=True, dir_okay=False, path_type=Path))
+@root_opt
+@name_opt
+@click.option("--reason", default="", help="Why this search (default: the file's reason).")
+@click.option("--dry-run", is_flag=True, help="List the candidates; run nothing.")
+@json_opt
+@click.pass_obj
+def search(
+    ctx: Ctx, experiment: Path, root: Path | None, name: str | None, reason: str, dry_run: bool, as_json: bool
+) -> None:
+    """Run every candidate of an experiment's [search] and judge the search itself: deflated Sharpe of the best,
+    walk-forward selection (no hindsight), probability of backtest overfitting, robustness without the best days."""
+    import datetime as _dt
+
+    from chairlift.ledger.trials import Headline, dig
+    from chairlift.search.select import summarize
+    from chairlift.search.space import SearchError, SearchSpace
+
+    exp = _experiment(str(experiment))
+    if not exp.search:
+        raise click.UsageError(f"{experiment.name} has no [search] table")
+    try:
+        space = SearchSpace.parse(exp.search)
+    except SearchError as exc:
+        raise click.UsageError(str(exc)) from exc
+    cands = [exp.params | c for c in space.candidates()]
+    built = [_build(ctx, str(experiment), root, (), name, cell=c) for c in cands]  # every candidate validated first
+    head = Headline.parse(built[0].headline)
+    if head is None or head.daily is None:
+        raise click.UsageError("a search needs the study's HEADLINE with a `daily` path (the series it judges)")
+    if dry_run:
+        for i, c in enumerate(cands):
+            click.echo(f"{i:3d}  {json.dumps(c, sort_keys=True)}")
+        click.echo(f"{len(cands)} candidate(s) · sampler {space.sampler} · seed {space.seed}")
+        return
+    sid = f"{_dt.datetime.now(_dt.UTC):%Y%m%dT%H%M%SZ}-{exp.digest()[:8]}"
+    rows: list[dict[str, Any]] = []
+    series: dict[str, dict[str, float]] = {}
+    for i, (c, b) in enumerate(zip(cands, built, strict=True)):
+        meta = b.meta(ctx) | {"search": {"id": sid, "candidate": i, "candidates": len(cands), "values": c}}
+        report = b.pipe.run(b.targets(()), reason=reason or exp.reason, meta=meta, headline=b.headline)
+        out = b.pipe.load(head.stage, report)
+        daily = dig(out, head.daily)
+        key = f"c{i:03d}"
+        series[key] = {str(d["date"]): float(d[head.value]) for d in daily}
+        rows.append(
+            {
+                "candidate": key,
+                "params": c,
+                "run_id": report.run_id,
+                "sharpe": float(dig(out, head.sharpe)),
+                "n_obs": int(dig(out, head.n_obs)),
+                "sharpe_without_top5": _ex_top5(list(series[key].values()), head.periods),
+            }
+        )
+        click.echo(f"  {key} sharpe {rows[-1]['sharpe']:+.3f}  {json.dumps(c, sort_keys=True)}", err=True)
+    summary = summarize(series, [r["sharpe"] for r in rows], n_obs=min(r["n_obs"] for r in rows), periods=head.periods)
+    record = {"search_id": sid, "experiment": exp.record(), "space": exp.search, "candidates": rows, **summary}
+    out_dir = b.root / "searches"  # pyright: ignore[reportPossiblyUnboundVariable]
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / f"{sid}.json").write_text(json.dumps(record, indent=1, sort_keys=True, default=str))
+    if as_json:
+        click.echo(json.dumps(record, indent=1, default=str))
+        return
+    t = _table("candidate", "sharpe", "without best 5", "params")
+    for r in sorted(rows, key=lambda r: -r["sharpe"]):
+        t.add_row(
+            r["candidate"],
+            f"{r['sharpe']:+.3f}",
+            f"{r['sharpe_without_top5']:+.3f}",
+            escape(json.dumps(r["params"], sort_keys=True)),
+        )
+    con = _console()
+    con.print(t)
+    d, wf, pb = summary["deflated"], summary["walk_forward_selection"], summary["pbo"]
+    con.print(
+        f"\nbest {d['best_sharpe']:+.3f} · expected max of {d['n_trials']} null trials"
+        f" {d['expected_max_sharpe_null']:+.3f} · deflated Sharpe probability {d['dsr']:.3f}"
+    )
+    con.print(
+        f"walk-forward selection (no hindsight): {wf['selected_oos_sharpe']:+.3f} over {wf['n_days']} obs vs best in"
+        f" hindsight {wf['best_in_hindsight_sharpe']:+.3f} · PBO {pb.get('pbo')}"
+    )
+    con.print(f"search {sid} · {len(rows)} candidates · {out_dir / (sid + '.json')}")
+
+
+def _ex_top5(x: list[float], periods: int) -> float | None:
+    import numpy as np
+
+    a = np.sort(np.asarray(x, float))[:-5]
+    return float(a.mean() / a.std(ddof=1) * np.sqrt(periods)) if len(a) > 10 and a.std(ddof=1) > 0 else None
+
+
+@main.command()
 @root_opt
 @click.option("--stage", help="Only this stage's records.")
 @click.option("--last", default=20, show_default=True, help="Most recent records to show.")

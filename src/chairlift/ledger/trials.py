@@ -27,6 +27,8 @@ class Headline:
     sharpe: str  # annualised Sharpe, e.g. "ls.sharpe"
     n_obs: str  # observations behind it, e.g. "ls.n_days"
     periods: int = 252  # observations per year (de-annualises the Sharpe)
+    daily: str | None = None  # dotted path to the daily series (a list of {date, ...}); a search needs it
+    value: str = "pnl"  # the field of each daily row that is the P&L
 
     @staticmethod
     def parse(raw: Any) -> Headline | None:

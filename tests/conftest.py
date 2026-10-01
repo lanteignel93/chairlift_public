@@ -34,6 +34,7 @@ TIERS = [
     "report",
     "run",
     "study",
+    "search",
     "verify",
     "properties",
     "golden",
@@ -61,6 +62,7 @@ WITHIN = {
     "evaluate": ["test_daily", "test_deflated"],
     "ledger": ["test_trials", "test_holdout"],
     "study": ["test_build"],
+    "search": ["test_space", "test_select"],
     "verify": ["test_toy", "test_twins"],
     "properties": ["test_spec_properties", "test_dag_properties"],
 }
