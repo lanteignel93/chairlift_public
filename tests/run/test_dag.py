@@ -280,3 +280,28 @@ def test_library_code_is_not_part_of_the_digest():
         return pl.DataFrame({"x": [1]})
 
     assert len(code_digest(uses_polars)) == 64  # polars' own source is not walked (other module)
+
+
+def test_the_code_digest_does_not_depend_on_the_hash_seed():
+    """Set iteration order changes with PYTHONHASHSEED; the digest walked sets (found: dataclass-generated methods
+    share one key, and the first visited won)."""
+    import subprocess
+    import sys
+
+    prog = (
+        "from chairlift.run.dag import code_digest\n"
+        "from chairlift.learn.fit import FitSpec, fit_walk_forward\n"
+        "from chairlift.learn.models import RidgeSpec, build\n"
+        "from chairlift.schedule.walkforward import Fold, WalkForward\n"
+        "print(code_digest(lambda: (fit_walk_forward, build, FitSpec, RidgeSpec, Fold, WalkForward)))"
+    )
+    out = {
+        subprocess.run(
+            [sys.executable, "-c", prog], capture_output=True, text=True, env={"PYTHONHASHSEED": str(seed)}
+        ).stdout
+        for seed in range(6)
+    }
+    digest = out.pop().strip() if len(out) == 1 else ""
+    assert (
+        len(digest) == 64 and digest != "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    )  # not empty

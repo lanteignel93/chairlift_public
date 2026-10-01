@@ -563,6 +563,11 @@ def rerun(
                 "data changed since; this is a different experiment.",
                 err=True,
             )
+            for n in mismatch:
+                click.echo(
+                    f"  {n}: {', '.join(_why_changed(rec['stages'].get(n, {}), b.pipe, n, sig)) or 'inputs only'}",
+                    err=True,
+                )
             sys.exit(1)
         env_then = rec.get("environment", {}).get("hash")
         env_now = environment()["hash"]
@@ -598,6 +603,26 @@ def _cell(v: Any) -> str:
 
 def _events_of(rec_path: Path) -> list[dict[str, Any]]:
     return read_events(rec_path.parent / rec_path.name.replace(".json", ".events.jsonl"))[0]  # run ids contain dots
+
+
+def _why_changed(then: dict[str, Any], pipe: Pipeline, name: str, sig: Any) -> list[str]:
+    """Which recorded component of a stage's identity no longer matches."""
+    from chairlift.core.spec import canonical, spec_hash
+    from chairlift.run.dag import captured
+
+    st = pipe.stages[name]
+    out: list[str] = []
+    if then.get("version") != st.version:
+        out.append(f"version {then.get('version')} → {st.version}")
+    if then.get("spec_hash") != spec_hash(st.spec):
+        out.append("spec")
+    if then.get("code") != st.code_hash:
+        out.append(f"code {str(then.get('code'))[:10]} → {st.code_hash[:10]}")
+    if then.get("captured") != canonical(captured(st.fn, st.ignore)):
+        out.append("captured values")
+    if then.get("fingerprint") != sig.fingerprints.get(name):
+        out.append("data fingerprint")
+    return out
 
 
 def _last_metrics(rec_path: Path, search: list[Path]) -> dict[str, float]:

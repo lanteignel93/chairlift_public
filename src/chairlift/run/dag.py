@@ -91,11 +91,22 @@ def captured(fn: Callable[..., Any], ignore: Iterable[str] = ()) -> dict[str, An
     return dict(sorted(out.items()))
 
 
+def _defined_in_own_module(f: Any, code: Any) -> bool:
+    """True when the function's code comes from the file of the module whose namespace it lives in (its globals:
+    works for imported modules, file-path studies and runpy alike)."""
+    g: dict[str, Any] = getattr(f, "__globals__", None) or {}
+    if g.get("__name__") != getattr(f, "__module__", None):
+        return False  # a wrapper renamed into another module (functools.wraps, dataclass __repr__)
+    path = g.get("__file__")
+    return isinstance(path, str) and os.path.realpath(path) == os.path.realpath(code.co_filename)
+
+
 def code_digest(fn: Callable[..., Any]) -> str:
     """sha256 over the source of a stage function and of every function or class it reaches by name, transitively,
     within the stage's own module and within chairlift. Editing study code or chairlift's research code re-runs
     exactly the stages that reach it; third-party libraries are covered by the environment hash and `version`."""
-    seen: dict[str, str] = {}
+    seen: dict[str, set[str]] = {}
+    done: set[int] = set()
 
     def code_of(f: Any) -> Any:
         while isinstance(f, functools.partial):
@@ -114,28 +125,35 @@ def code_digest(fn: Callable[..., Any]) -> str:
         return m == module or m == "chairlift" or m.startswith("chairlift.")
 
     def visit_class(c: type, module: str | None) -> None:
-        key = f"{c.__module__}.{c.__qualname__}"
-        if key in seen:
+        if id(c) in done:
             return
+        done.add(id(c))
+        key = f"{'<study>' if c.__module__ == module else c.__module__}.{c.__qualname__}"
         try:
-            seen[key] = inspect.getsource(c)
+            seen.setdefault(key, set()).add(inspect.getsource(c))
         except (OSError, TypeError):
-            seen[key] = key
+            seen.setdefault(key, set()).add(key)
         for v in vars(c).values():
             if inspect.isfunction(v):
                 visit(v, module)
 
-    def visit(f: Any, module: str | None) -> None:
+    def visit(f: Any, module: str | None, root: bool = False) -> None:
         code, f = code_of(f)
         if code is None:
             return
-        key = f"{getattr(f, '__module__', '')}.{getattr(f, '__qualname__', '')}:{code.co_firstlineno}"
-        if key in seen:
+        if id(code) in done or (not root and not _defined_in_own_module(f, code)):
+            # visited; or not code of the module it claims (dataclass-generated __init__ / __repr__ and stdlib
+            # wrappers renamed to Class.method share one code object across classes: hashing it would make the
+            # digest depend on which class the walk met first). The class source already covers what they derive from
             return
+        done.add(id(code))
+        mod = getattr(f, "__module__", "") or ""
+        label = "<study>" if mod == module else mod  # the loader names a study module differently (CLI, runpy, import)
+        key = f"{label}.{getattr(f, '__qualname__', '')}:{code.co_firstlineno}"
         try:
-            seen[key] = inspect.getsource(f)
+            seen.setdefault(key, set()).add(inspect.getsource(f))
         except (OSError, TypeError):
-            seen[key] = code.co_code.hex()  # no source on disk: the bytecode is the next best identity
+            seen.setdefault(key, set()).add(code.co_code.hex())  # no source on disk: the bytecode
         g = getattr(f, "__globals__", {})
         for name in names(code):
             target = g.get(name)
@@ -154,8 +172,10 @@ def code_digest(fn: Callable[..., Any]) -> str:
                 visit(c, module)
 
     _, root = code_of(fn)
-    visit(fn, getattr(root, "__module__", None))
-    return hashlib.sha256("\x1f".join(f"{k}\x1e{v}" for k, v in sorted(seen.items())).encode()).hexdigest()
+    visit(fn, getattr(root, "__module__", None), root=True)
+    # every source under a key, sorted: the digest cannot depend on the order the walk met them
+    body = "\x1f".join(f"{k}\x1e{chr(0x1D).join(sorted(v))}" for k, v in sorted(seen.items()))
+    return hashlib.sha256(body.encode()).hexdigest()
 
 
 @dataclass(frozen=True)
