@@ -260,6 +260,19 @@ def test_editing_a_helper_a_stage_calls_changes_the_stage_key():
     assert code_digest(stage_a) == code_digest(stage_a)
 
 
+def test_chairlift_functions_a_stage_reaches_are_part_of_the_digest():
+    from chairlift.evaluate.daily import daily_stats
+    from chairlift.run.dag import code_digest
+
+    def stage() -> object:
+        return daily_stats
+
+    def other() -> object:
+        return None
+
+    assert code_digest(stage) != code_digest(other)  # daily_stats' source is in stage's digest
+
+
 def test_library_code_is_not_part_of_the_digest():
     from chairlift.run.dag import code_digest
 

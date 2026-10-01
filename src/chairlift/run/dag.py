@@ -92,9 +92,9 @@ def captured(fn: Callable[..., Any], ignore: Iterable[str] = ()) -> dict[str, An
 
 
 def code_digest(fn: Callable[..., Any]) -> str:
-    """sha256 over the source of a stage function and of every function of the same module it reaches by name,
-    transitively (helpers called from a lambda included). Editing study code re-runs exactly the stages whose code
-    changed; code in other modules (chairlift, libraries) is covered by `version` and the environment hash."""
+    """sha256 over the source of a stage function and of every function or class it reaches by name, transitively,
+    within the stage's own module and within chairlift. Editing study code or chairlift's research code re-runs
+    exactly the stages that reach it; third-party libraries are covered by the environment hash and `version`."""
     seen: dict[str, str] = {}
 
     def code_of(f: Any) -> Any:
@@ -108,6 +108,22 @@ def code_digest(fn: Callable[..., Any]) -> str:
             if inspect.iscode(c):
                 out |= names(c)
         return out
+
+    def ours(obj: Any, module: str | None) -> bool:
+        m = getattr(obj, "__module__", None) or ""
+        return m == module or m == "chairlift" or m.startswith("chairlift.")
+
+    def visit_class(c: type, module: str | None) -> None:
+        key = f"{c.__module__}.{c.__qualname__}"
+        if key in seen:
+            return
+        try:
+            seen[key] = inspect.getsource(c)
+        except (OSError, TypeError):
+            seen[key] = key
+        for v in vars(c).values():
+            if inspect.isfunction(v):
+                visit(v, module)
 
     def visit(f: Any, module: str | None) -> None:
         code, f = code_of(f)
@@ -123,14 +139,18 @@ def code_digest(fn: Callable[..., Any]) -> str:
         g = getattr(f, "__globals__", {})
         for name in names(code):
             target = g.get(name)
-            if inspect.isfunction(target) and target.__module__ == module:
+            if inspect.ismodule(target) and (target.__name__.startswith("chairlift") or target.__name__ == module):
+                continue  # attribute access through a module object: not followed (names are imported directly here)
+            if inspect.isfunction(target) and ours(target, module):
                 visit(target, module)
+            elif isinstance(target, type) and ours(target, module):
+                visit_class(target, module)
         for cell in getattr(f, "__closure__", None) or ():
             try:
                 c = cell.cell_contents
             except ValueError:
                 continue
-            if inspect.isfunction(c) and c.__module__ == module:
+            if inspect.isfunction(c) and ours(c, module):
                 visit(c, module)
 
     _, root = code_of(fn)
