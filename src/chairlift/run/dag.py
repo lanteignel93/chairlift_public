@@ -35,6 +35,7 @@ import polars as _pl
 from chairlift.core.identity import code_identity
 from chairlift.core.spec import canonical, spec_hash
 from chairlift.data.manifest import Manifest
+from chairlift.data.refs import StatCache, bind
 from chairlift.data.store import ArtifactStore
 from chairlift.run.events import EventLog, Listener, bound
 
@@ -101,9 +102,20 @@ class RunReport:
 
 
 class Pipeline:
-    def __init__(self, stages: Iterable[Stage], root: Path | str, store: Path | str | None = None) -> None:
+    def __init__(
+        self,
+        stages: Iterable[Stage],
+        root: Path | str,
+        store: Path | str | None = None,
+        *,
+        data: Mapping[str, Path] | None = None,
+        cache: Path | str | None = None,
+    ) -> None:
         """`root` holds this study's run records. `store` is the content store + manifest; given a shared store,
-        every study on the machine reuses every other study's stages. Without one the root is self-contained."""
+        every study on the machine reuses every other study's stages. Without one the root is self-contained.
+
+        `data` maps the study's data aliases to directories on this machine (the site config's `[data]`); `cache`
+        holds the fingerprint stat cache. Both are site settings: they never enter a key or the signature."""
         self.stages = {s.name: s for s in stages}
         for s in self.stages.values():
             missing = [i for i in s.inputs if i not in self.stages]
@@ -114,6 +126,8 @@ class Pipeline:
         except CycleError as exc:
             raise ValueError(f"pipeline has a cycle: {exc.args[1]}") from exc
         self.root = Path(root)
+        self.data: dict[str, Path] = {k: Path(v) for k, v in (data or {}).items()}
+        self.cache = StatCache(Path(cache)) if cache is not None else None
         if store is None:
             self.store = ArtifactStore(self.root / "store")
             self.manifest = Manifest(self.root / "manifest.jsonl")
@@ -121,9 +135,23 @@ class Pipeline:
             self.store = ArtifactStore(Path(store))
             self.manifest = Manifest(Path(store) / "manifest.jsonl", shared=True)
 
-    def rebase(self, root: Path | str, store: Path | str | None = None) -> Pipeline:
-        """The same stages over another run root and store (how the CLI places a study under the configured home)."""
-        return Pipeline(self.stages.values(), root, store)
+    def rebase(
+        self,
+        root: Path | str,
+        store: Path | str | None = None,
+        *,
+        data: Mapping[str, Path] | None = None,
+        cache: Path | str | None = None,
+    ) -> Pipeline:
+        """The same stages over another run root, store and data roots (how the CLI places a study on this machine).
+        Data roots and cache not given are kept."""
+        return Pipeline(
+            self.stages.values(),
+            root,
+            store,
+            data=self.data if data is None else data,
+            cache=cache if cache is not None else (self.cache.directory if self.cache else None),
+        )
 
     def _needed(self, targets: Iterable[str] | None) -> list[str]:
         if targets is None:
@@ -142,10 +170,11 @@ class Pipeline:
     def _fingerprints(self, names: Iterable[str]) -> dict[str, str]:
         """Each source's fingerprint, computed once per call (a fingerprint may hash files)."""
         out: dict[str, str] = {}
-        for n in names:
-            fp = self.stages[n].fingerprint
-            if fp is not None:
-                out[n] = fp()
+        with bind(self.data, self.cache):
+            for n in names:
+                fp = self.stages[n].fingerprint
+                if fp is not None:
+                    out[n] = fp()
         return out
 
     def signature(self, targets: Iterable[str] | None = None) -> Signature:
@@ -267,7 +296,7 @@ class Pipeline:
             t0, c0 = time.perf_counter(), time.process_time()
             try:
                 kwargs = {i: self.store.get(refs[i]) for i in stage.inputs}
-                with bound(log, name):
+                with bound(log, name), bind(self.data, self.cache):
                     result = stage.fn(**kwargs) if stage.spec is None else stage.fn(stage.spec, **kwargs)
                 ref = self.store.put(result)
             except BaseException as exc:
@@ -338,6 +367,7 @@ class Pipeline:
             "targets": targets,
             "reason": reason,
             "meta": dict(meta or {}),
+            "data": {k: str(v) for k, v in sorted(self.data.items())},  # where the data was here; not hashed
             "stages": stages,
             "code": code_identity(),
             "environment": _environment(),

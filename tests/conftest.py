@@ -40,7 +40,7 @@ TIERS = [
 # within a tier, modules run in their dependency order; unlisted files follow, alphabetically
 WITHIN = {
     "core": ["test_spec", "test_identity", "test_config", "test_secrets"],
-    "data": ["test_store", "test_manifest"],
+    "data": ["test_store", "test_manifest", "test_refs"],
     "run": ["test_dag", "test_events", "test_signature", "test_live", "test_cli", "test_wiring"],
     "properties": ["test_spec_properties", "test_dag_properties"],
 }

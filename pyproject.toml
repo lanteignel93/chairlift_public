@@ -5,6 +5,7 @@ description = "A machine-learning research pipeline in which the research protoc
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "blake3>=1.0",
     "click>=8.1",
     "msgspec>=0.22",
     "numpy>=1.26",

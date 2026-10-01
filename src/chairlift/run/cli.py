@@ -115,17 +115,19 @@ def _build(ctx: Ctx, study: str, root: Path | None, sets: tuple[str, ...], name:
     module, factory = _load_factory(study)
     sname = _study_name(study, module, name)
     store: Path | None = None
+    cfg = ctx.config().config
+    cache = cfg.paths.cache_dir()
     if root is None:
-        paths = ctx.config().config.paths
-        root, store = paths.study_dir(sname), paths.store_dir()
+        root, store = cfg.paths.study_dir(sname), cfg.paths.store_dir()
+    else:
+        cache = root / "cache"
     try:
         pipe = factory(root, **_parse_sets(sets))
     except TypeError as exc:
         raise click.UsageError(f"the factory rejected the parameters: {exc}") from exc
     if not isinstance(pipe, Pipeline):
         raise click.UsageError(f"{study} returned {type(pipe).__qualname__}, not a Pipeline")
-    if store is not None:
-        pipe = pipe.rebase(root, store)
+    pipe = pipe.rebase(root, store, data=cfg.data, cache=cache)  # data roots come from this machine's config
     return Built(pipe, sname, root, store is not None)
 
 
