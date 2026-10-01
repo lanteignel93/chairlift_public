@@ -41,13 +41,29 @@ class Manifest:
         self.shared = shared
         self.path = self.base.with_name(f"{self.base.stem}.{self.host}{self.base.suffix}") if shared else self.base
         self._by_key: dict[str, Record] = {}
-        records: list[Record] = []
+        self._offsets: dict[Path, int] = {}
+        self._refresh()
+
+    def _refresh(self) -> None:
+        """Fold in every complete line appended since the last read, by this process or any other.
+
+        Another pipeline over the same store (a sweep's next cell, a run on another host) may have built a key since
+        this one was opened; a miss re-reads before it answers, so nothing is rebuilt that already exists.
+        """
+        new: list[Record] = []
         for f in self.files():
-            for line in f.read_text().splitlines():
+            with f.open("rb") as fh:
+                fh.seek(self._offsets.get(f, 0))
+                chunk = fh.read()
+            end = chunk.rfind(b"\n") + 1  # a line still being written is left for the next read
+            self._offsets[f] = self._offsets.get(f, 0) + end
+            for line in chunk[:end].decode().splitlines():
                 if line.strip():
-                    records.append(Record(**json.loads(line)))
-        for rec in sorted(records, key=lambda r: r.built_at):  # stable: file order breaks ties
-            self._by_key[rec.key] = rec  # a later record for the same key supersedes an earlier one
+                    new.append(Record(**json.loads(line)))
+        for rec in sorted(new, key=lambda r: r.built_at):  # stable: file order breaks ties
+            old = self._by_key.get(rec.key)
+            if old is None or rec.built_at >= old.built_at:  # a later record for a key supersedes an earlier one
+                self._by_key[rec.key] = rec
 
     def files(self) -> list[Path]:
         """Every manifest file this manifest reads, in a stable order."""
@@ -57,6 +73,8 @@ class Manifest:
         return sorted(d.glob(f"{self.base.stem}*{self.base.suffix}")) if d.exists() else []
 
     def lookup(self, key: str) -> Record | None:
+        if key not in self._by_key:
+            self._refresh()
         return self._by_key.get(key)
 
     def append(
@@ -90,4 +108,5 @@ class Manifest:
         return rec
 
     def records(self) -> list[Record]:
+        self._refresh()
         return list(self._by_key.values())

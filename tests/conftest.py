@@ -41,7 +41,7 @@ TIERS = [
 WITHIN = {
     "core": ["test_spec", "test_identity", "test_config", "test_secrets"],
     "data": ["test_store", "test_manifest", "test_refs"],
-    "run": ["test_dag", "test_events", "test_signature", "test_live", "test_cli", "test_wiring"],
+    "run": ["test_dag", "test_events", "test_signature", "test_live", "test_experiment", "test_cli", "test_wiring"],
     "properties": ["test_spec_properties", "test_dag_properties"],
 }
 TESTS = Path(__file__).parent

@@ -2,7 +2,10 @@
 
 A study is referenced as `module:factory` or `path/to/file.py:factory`, where the factory builds the study's pipeline
 for a run root: `factory(root, **params) -> Pipeline`. `--set name=value` passes keyword parameters to the factory;
-values are parsed as JSON when they can be (5 → int, 0.1 → float, true → bool) and kept as strings otherwise.
+values are parsed as JSON when they can be (5 → int, 0.1 → float, true → bool) and kept as strings otherwise. Every
+parameter is checked against the factory's annotations before anything is built. In place of STUDY, an experiment
+file (`experiments/<name>.toml`, see `chairlift.run.experiment`) names the study, its parameters and targets; `--set`
+then overrides the file. `chairlift sweep EXP.toml` runs every cell of its `[sweep]`.
 
 Where things go comes from the site configuration (`chairlift config show --explain`): a study named N runs under
 `<paths.home>/studies/N/` and shares `<paths.home>/store/` with every other study on the machine. The name is the
@@ -11,6 +14,7 @@ study module's `STUDY_NAME`, or `--name`. `--root DIR` instead makes one self-co
 
 from __future__ import annotations
 
+import datetime as dt
 import importlib
 import importlib.util
 import json
@@ -19,7 +23,7 @@ import re
 import socket
 import sys
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -33,6 +37,7 @@ from chairlift.core.config import STARTER, ConfigError, Resolved, load_config
 from chairlift.data.manifest import Manifest
 from chairlift.run.dag import Pipeline, RunReport
 from chairlift.run.events import read_events
+from chairlift.run.experiment import Experiment, ExperimentError, load_experiment, validate_params
 from chairlift.run.live import RunState, apply, render, replay
 
 # ---- helpers -----------------------------------------------------------------------------------------------------
@@ -109,11 +114,54 @@ class Built:
     name: str
     root: Path
     shared_store: bool
+    study: str = ""
+    params: dict[str, Any] = field(default_factory=dict[str, Any])
+    experiment: Experiment | None = None
+
+    def targets(self, given: tuple[str, ...]) -> list[str] | None:
+        if given:
+            return list(given)
+        return list(self.experiment.targets) if self.experiment and self.experiment.targets else None
+
+    def meta(self, ctx: Ctx) -> dict[str, Any]:
+        meta: dict[str, Any] = {"study": self.study, "name": self.name, "params": self.params}
+        if self.experiment is not None:
+            meta["experiment"] = self.experiment.record()
+        if self.shared_store:
+            meta["config"] = ctx.config().record()
+        return meta
 
 
-def _build(ctx: Ctx, study: str, root: Path | None, sets: tuple[str, ...], name: str | None) -> Built:
+def _experiment(path: str) -> Experiment:
+    try:
+        return load_experiment(path)
+    except (ExperimentError, OSError) as exc:
+        raise click.BadParameter(str(exc), param_hint="STUDY") from exc
+
+
+def _build(
+    ctx: Ctx,
+    study: str,
+    root: Path | None,
+    sets: tuple[str, ...],
+    name: str | None,
+    *,
+    cell: dict[str, Any] | None = None,
+) -> Built:
+    """STUDY is `module:factory`, `file.py:factory`, or an experiment file; `cell` replaces the file's parameters."""
+    exp: Experiment | None = None
+    base: dict[str, Any] = {}
+    if study.endswith(".toml"):
+        exp = _experiment(study)
+        if exp.sweep and cell is None:
+            raise click.UsageError(f"{exp.path.name} has a [sweep]; run it with `chairlift sweep`")
+        study, base, name = exp.study, (cell if cell is not None else exp.params), name or exp.study_name
     module, factory = _load_factory(study)
     sname = _study_name(study, module, name)
+    try:
+        params = validate_params(factory, base | _parse_sets(sets))
+    except ExperimentError as exc:
+        raise click.UsageError(str(exc)) from exc
     store: Path | None = None
     cfg = ctx.config().config
     cache = cfg.paths.cache_dir()
@@ -122,13 +170,13 @@ def _build(ctx: Ctx, study: str, root: Path | None, sets: tuple[str, ...], name:
     else:
         cache = root / "cache"
     try:
-        pipe = factory(root, **_parse_sets(sets))
+        pipe = factory(root, **params)
     except TypeError as exc:
         raise click.UsageError(f"the factory rejected the parameters: {exc}") from exc
     if not isinstance(pipe, Pipeline):
         raise click.UsageError(f"{study} returned {type(pipe).__qualname__}, not a Pipeline")
     pipe = pipe.rebase(root, store, data=cfg.data, cache=cache)  # data roots come from this machine's config
-    return Built(pipe, sname, root, store is not None)
+    return Built(pipe, sname, root, store is not None, study, params, exp)
 
 
 _RICH = {"hit": "dim", "ran": "green", "run": "yellow", "upstream": "cyan"}
@@ -196,18 +244,17 @@ def run(
     live: bool | None,
     as_json: bool,
 ) -> None:
-    """Run a study's pipeline; reuse every stage whose inputs, spec and version are unchanged."""
+    """Run a study's pipeline or an experiment file; reuse every stage whose inputs, spec and version are unchanged."""
     b = _build(ctx, study, root, sets, name)
-    meta: dict[str, Any] = {"study": study, "name": b.name, "params": _parse_sets(sets)}
-    if b.shared_store:
-        meta["config"] = ctx.config().record()
+    meta = b.meta(ctx)
+    reason = reason or (b.experiment.reason if b.experiment else "")
     animate = (sys.stdout.isatty() if live is None else live) and not as_json
     if animate:
-        report = _run_live(b, list(targets) or None, reason, meta)
+        report = _run_live(b, b.targets(targets), reason, meta)
         ran = report.ran()
         _console().print(f"{len(ran)} ran, {len(report.results) - len(ran)} reused · {b.name} · run {report.run_id}")
         return
-    report = b.pipe.run(list(targets) or None, reason=reason, meta=meta)
+    report = b.pipe.run(b.targets(targets), reason=reason, meta=meta)
     if as_json:
         click.echo(json.dumps([r.__dict__ for r in report.results.values()], indent=1))
         return
@@ -250,7 +297,8 @@ def plan(
     as_json: bool,
 ) -> None:
     """Show what `run` would do, without running anything."""
-    items = _build(ctx, study, root, sets, name).pipe.plan(list(targets) or None)
+    b = _build(ctx, study, root, sets, name)
+    items = b.pipe.plan(b.targets(targets))
     if as_json:
         click.echo(json.dumps([i.__dict__ for i in items], indent=1))
         return
@@ -303,7 +351,8 @@ def signature(
     as_json: bool,
 ) -> None:
     """Print the run signature (inputs-only identity) and each stage's plan key, without running."""
-    sig = _build(ctx, study, root, sets, name).pipe.signature(list(targets) or None)
+    b = _build(ctx, study, root, sets, name)
+    sig = b.pipe.signature(b.targets(targets))
     if as_json:
         click.echo(json.dumps({"signature": sig.signature, "plan_keys": sig.plan_keys}, indent=1))
         return
@@ -313,6 +362,58 @@ def signature(
     con = _console()
     con.print(t)
     con.print(f"\nsignature {sig.signature}")
+
+
+@main.command()
+@click.argument("experiment", type=click.Path(exists=True, dir_okay=False, path_type=Path))
+@root_opt
+@name_opt
+@set_opt
+@target_opt
+@click.option("--reason", default="", help="Why this sweep (default: the file's reason).")
+@click.option("--dry-run", is_flag=True, help="List the cells and their signatures; run nothing.")
+@json_opt
+@click.pass_obj
+def sweep(
+    ctx: Ctx,
+    experiment: Path,
+    root: Path | None,
+    name: str | None,
+    sets: tuple[str, ...],
+    targets: tuple[str, ...],
+    reason: str,
+    dry_run: bool,
+    as_json: bool,
+) -> None:
+    """Run every cell of an experiment's [sweep], in order, sharing one store: unchanged stages are reused."""
+    exp = _experiment(str(experiment))
+    cells = exp.cells()
+    built = [_build(ctx, str(experiment), root, sets, name, cell=c) for c in cells]  # every cell validated first
+    sweep_id = f"{dt.datetime.now(dt.UTC):%Y%m%dT%H%M%SZ}-{exp.digest()[:8]}"
+    keys = list(exp.sweep)
+    rows: list[dict[str, Any]] = []
+    for i, (c, b) in enumerate(zip(cells, built, strict=True)):
+        tg = b.targets(targets)
+        row: dict[str, Any] = {"cell": i, "values": {k: b.params.get(k, c[k]) for k in keys}}
+        if dry_run:
+            row["signature"] = b.pipe.signature(tg).signature
+        else:
+            meta = b.meta(ctx) | {"sweep": {"id": sweep_id, "cell": i, "cells": len(cells), "values": row["values"]}}
+            report = b.pipe.run(tg, reason=reason or exp.reason, meta=meta)
+            row |= {"signature": report.signature, "run_id": report.run_id, "ran": len(report.ran())}
+            row["reused"] = len(report.results) - row["ran"]
+        rows.append(row)
+    if as_json:
+        click.echo(json.dumps({"sweep_id": sweep_id, "experiment": exp.name, "cells": rows}, indent=1))
+        return
+    t = _table("cell", *keys, "signature", *(() if dry_run else ("ran", "reused", "run_id")))
+    for r in rows:
+        extra = () if dry_run else (str(r["ran"]), str(r["reused"]), r["run_id"])
+        t.add_row(str(r["cell"]), *(json.dumps(r["values"][k]) for k in keys), r["signature"][:12], *extra)
+    con = _console()
+    con.print(t)
+    verb = "planned" if dry_run else "ran"
+    con.print(f"\n{len(rows)} cell(s) {verb} · {exp.name} · sweep {sweep_id}")
 
 
 @main.command()

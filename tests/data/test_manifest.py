@@ -102,3 +102,20 @@ def test_old_records_without_a_host_still_load(tmp_path: Path):
     }
     path.write_text(json.dumps(line) + "\n")
     assert Manifest(path, shared=True, host="h").lookup("k") is not None
+
+
+def test_a_miss_sees_what_another_manifest_appended_since_it_was_opened(tmp_path: Path):
+    early = Manifest(tmp_path / "manifest.jsonl", shared=True, host="a")  # opened before anything was built
+    Manifest(tmp_path / "manifest.jsonl", shared=True, host="b").append(key="k", output=ref("0"), reason="r", **COMMON)
+    assert early.lookup("k") is not None
+
+
+def test_a_line_being_written_is_left_for_the_next_read(tmp_path: Path):
+    path = tmp_path / "manifest.jsonl"
+    m = Manifest(path)
+    Manifest(path).append(key="k1", output=ref("0"), reason="r", **COMMON)
+    full = path.read_text()
+    path.write_text(full + full.replace("k1", "k2")[:40])  # a second writer is mid-line
+    assert m.lookup("k1") is not None and m.lookup("k2") is None
+    path.write_text(full + full.replace("k1", "k2"))
+    assert m.lookup("k2") is not None
