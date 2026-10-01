@@ -66,3 +66,12 @@ def test_failed_run_is_recorded_as_failed(tmp_path: Path):
         p.run()
     rec = json.loads(next((tmp_path / "r" / "runs").glob("*.json")).read_text())
     assert rec["status"] == "failed" and "stage exploded" in rec["error"]
+
+
+def test_environment_hash_is_recorded_stable_and_independent_of_paths(tmp_path):
+    from chairlift.run.dag import environment
+
+    env = environment()
+    assert len(env["hash"]) == 64 and env["distributions"] == sorted(env["distributions"])
+    assert any(d.startswith("polars==") for d in env["distributions"])
+    assert str(tmp_path) not in json.dumps(env)

@@ -20,8 +20,10 @@ import importlib.util
 import json
 import os
 import re
+import shutil
 import socket
 import sys
+import tempfile
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -35,7 +37,7 @@ from rich.table import Table
 
 from chairlift.core.config import STARTER, ConfigError, Resolved, load_config
 from chairlift.data.manifest import Manifest
-from chairlift.run.dag import Pipeline, RunReport
+from chairlift.run.dag import Pipeline, RunReport, environment
 from chairlift.run.events import read_events
 from chairlift.run.experiment import Experiment, ExperimentError, load_experiment, validate_params
 from chairlift.run.live import RunState, apply, render, replay
@@ -156,18 +158,28 @@ def _build(
         if exp.sweep and cell is None:
             raise click.UsageError(f"{exp.path.name} has a [sweep]; run it with `chairlift sweep`")
         study, base, name = exp.study, (cell if cell is not None else exp.params), name or exp.study_name
+    b = _build_ref(ctx, study, root, base | _parse_sets(sets), name, shared=root is None)
+    b.experiment = exp
+    return b
+
+
+def _build_ref(
+    ctx: Ctx, study: str, root: Path | None, raw_params: dict[str, Any], name: str | None, *, shared: bool
+) -> Built:
+    """Build `module:factory` with validated parameters: under the configured home when `shared`, else in `root`."""
     module, factory = _load_factory(study)
     sname = _study_name(study, module, name)
     try:
-        params = validate_params(factory, base | _parse_sets(sets))
+        params = validate_params(factory, raw_params)
     except ExperimentError as exc:
         raise click.UsageError(str(exc)) from exc
     store: Path | None = None
     cfg = ctx.config().config
     cache = cfg.paths.cache_dir()
-    if root is None:
+    if shared:
         root, store = cfg.paths.study_dir(sname), cfg.paths.store_dir()
     else:
+        assert root is not None
         cache = root / "cache"
     try:
         pipe = factory(root, **params)
@@ -176,7 +188,7 @@ def _build(
     if not isinstance(pipe, Pipeline):
         raise click.UsageError(f"{study} returned {type(pipe).__qualname__}, not a Pipeline")
     pipe = pipe.rebase(root, store, data=cfg.data, cache=cache)  # data roots come from this machine's config
-    return Built(pipe, sname, root, store is not None, study, params, exp)
+    return Built(pipe, sname, root, store is not None, study, params)
 
 
 _RICH = {"hit": "dim", "ran": "green", "run": "yellow", "upstream": "cyan"}
@@ -493,16 +505,159 @@ def runs(ctx: click.Context, root: Path | None, study_name: str | None) -> None:
     _console().print(t)
 
 
+def _find_run(ctx: Ctx, root: Path | None, study: str | None, run: str) -> dict[str, Any]:
+    """A run record by run id or signature prefix: the newest match."""
+    matches = [r for r in _records(ctx, root, study) if r["run_id"].startswith(run) or r["signature"].startswith(run)]
+    if not matches:
+        raise click.BadParameter(f"no run or signature starting with {run!r}", param_hint="RUN")
+    return matches[-1]
+
+
 @runs.command("show")
 @click.argument("run")
 @click.pass_context
 def runs_show(ctx: click.Context, run: str) -> None:
     """Print a run record by run id or signature prefix (the newest match)."""
-    recs = _records(ctx.obj, ctx.meta["runs_root"], ctx.meta["runs_study"])
-    matches = [r for r in recs if r["run_id"].startswith(run) or r["signature"].startswith(run)]
-    if not matches:
-        raise click.BadParameter(f"no run or signature starting with {run!r}", param_hint="RUN")
-    click.echo(json.dumps(matches[-1], indent=1, sort_keys=True))
+    rec = _find_run(ctx.obj, ctx.meta["runs_root"], ctx.meta["runs_study"], run)
+    click.echo(json.dumps(rec, indent=1, sort_keys=True))
+
+
+@main.command()
+@click.argument("run")
+@root_opt
+@click.option("--study", "study_name", default=None, help="Look for RUN in this study only.")
+@click.option("--into", type=click.Path(path_type=Path), default=None, help="Rebuild here (default: a temp dir).")
+@click.option("--keep", is_flag=True, help="Keep the rebuilt directory.")
+@json_opt
+@click.pass_obj
+def rerun(
+    ctx: Ctx, run: str, root: Path | None, study_name: str | None, into: Path | None, keep: bool, as_json: bool
+) -> None:
+    """Rebuild a recorded run from its record alone, from scratch, and check every output is byte-identical.
+
+    Exit 0 when every stage reproduces; 1 when an output differs or the signature does (the study code, the
+    parameters or the data changed since). A different environment hash is a warning: identical bytes are then
+    likely but not promised.
+    """
+    rec = _find_run(ctx, root, study_name, run)
+    meta = rec.get("meta", {})
+    if not meta.get("study"):
+        raise click.UsageError(f"run {rec['run_id']} records no study reference; it was not started by the CLI")
+    fresh = into or Path(tempfile.mkdtemp(prefix="chairlift-rerun-"))
+    if into is not None and into.exists() and any(into.iterdir()):
+        raise click.UsageError(f"{into} is not empty; rerun needs a fresh directory so nothing is reused")
+    try:
+        b = _build_ref(ctx, meta["study"], fresh, meta.get("params", {}), meta.get("name"), shared=False)
+        targets = rec.get("targets")
+        sig = b.pipe.signature(targets)
+        mismatch = sorted(n for n, k in sig.plan_keys.items() if rec["stages"].get(n, {}).get("plan_key") != k)
+        if sig.signature != rec["signature"]:
+            click.echo(
+                f"signature differs: recorded {rec['signature'][:12]}, now {sig.signature[:12]}; "
+                f"changed stage(s): {', '.join(mismatch) or '(stage set)'}. The definition, the parameters or the "
+                "data changed since; this is a different experiment.",
+                err=True,
+            )
+            sys.exit(1)
+        env_then = rec.get("environment", {}).get("hash")
+        env_now = environment()["hash"]
+        if env_then != env_now:
+            click.echo(f"warning: environment differs ({str(env_then)[:12]} → {env_now[:12]})", err=True)
+        report = b.pipe.run(targets, reason=f"rerun of {rec['run_id']}", meta=b.meta(ctx) | {"rerun_of": rec["run_id"]})
+        rows: list[dict[str, Any]] = []
+        for n, r in report.results.items():
+            then = rec.get("results", {}).get(n, {}).get("output")
+            rows.append({"stage": n, "recorded": then, "reproduced": r.output, "match": then == r.output})
+    finally:
+        if not keep and into is None:
+            shutil.rmtree(fresh, ignore_errors=True)
+    ok = all(r["match"] for r in rows)
+    if as_json:
+        click.echo(json.dumps({"run_id": rec["run_id"], "ok": ok, "stages": rows}, indent=1))
+    else:
+        t = _table("stage", "recorded", "reproduced", "")
+        for r in rows:
+            mark = "[green]identical[/]" if r["match"] else "[red]DIFFERS[/]"
+            t.add_row(r["stage"], str(r["recorded"])[:20], r["reproduced"][:20], mark)
+        con = _console()
+        con.print(t)
+        verdict = "reproduced bit for bit" if ok else "NOT reproduced"
+        con.print(f"\n{rec['run_id']}: {verdict}" + (f" · kept in {fresh}" if keep or into else ""))
+    if not ok:
+        sys.exit(1)
+
+
+def _last_metrics(rec_path: Path) -> dict[str, float]:
+    evs, _ = read_events(rec_path.parent / rec_path.name.replace(".json", ".events.jsonl"))  # run ids contain dots
+    out: dict[str, float] = {}
+    for e in evs:
+        if e.get("kind") == "metric":
+            raw: dict[str, Any] = e.get("dims") or {}
+            dims = ",".join(f"{k}={v}" for k, v in sorted(raw.items()))
+            out[f"{e.get('stage')}.{e['name']}" + (f"[{dims}]" if dims else "")] = e["value"]
+    return out
+
+
+def _run_path(ctx: Ctx, root: Path | None, rec: dict[str, Any]) -> Path:
+    if root is not None:
+        return root / "runs" / f"{rec['run_id']}.json"
+    return ctx.config().config.paths.study_dir(rec.get("meta", {}).get("name", "")) / "runs" / f"{rec['run_id']}.json"
+
+
+@main.command()
+@click.argument("run_a")
+@click.argument("run_b")
+@root_opt
+@click.option("--all", "show_all", is_flag=True, help="Show equal rows too.")
+@json_opt
+@click.pass_obj
+def compare(ctx: Ctx, run_a: str, run_b: str, root: Path | None, show_all: bool, as_json: bool) -> None:
+    """Diff two runs: parameters, per-stage specs and data fingerprints, outputs, environment, last metrics."""
+    a, b = _find_run(ctx, root, None, run_a), _find_run(ctx, root, None, run_b)
+    rows: list[tuple[str, str, Any, Any]] = []
+
+    def add(section: str, key: str, va: Any, vb: Any) -> None:
+        rows.append((section, key, va, vb))
+
+    add("run", "signature", a["signature"][:12], b["signature"][:12])
+    add("run", "study", a.get("meta", {}).get("name"), b.get("meta", {}).get("name"))
+    pa, pb = a.get("meta", {}).get("params", {}), b.get("meta", {}).get("params", {})
+    for k in sorted(set(pa) | set(pb)):
+        add("params", k, pa.get(k, "—"), pb.get(k, "—"))
+    for n in sorted(set(a["stages"]) | set(b["stages"])):
+        sa, sb = a["stages"].get(n, {}), b["stages"].get(n, {})
+        add("spec", n, (sa.get("spec_hash") or "—")[:12], (sb.get("spec_hash") or "—")[:12])
+        if sa.get("fingerprint") or sb.get("fingerprint"):
+            add("data", n, str(sa.get("fingerprint", "—"))[:20], str(sb.get("fingerprint", "—"))[:20])
+        oa = a.get("results", {}).get(n, {}).get("output") or "—"
+        ob = b.get("results", {}).get(n, {}).get("output") or "—"
+        add("output", n, oa[:20], ob[:20])
+    ea, eb = a.get("environment", {}), b.get("environment", {})
+    add("env", "hash", str(ea.get("hash", "—"))[:12], str(eb.get("hash", "—"))[:12])
+    add("env", "python", ea.get("python"), eb.get("python"))
+    add("env", "code", a.get("code"), b.get("code"))
+    da, db = set(ea.get("distributions", [])), set(eb.get("distributions", []))
+    for d in sorted(da ^ db):
+        add("env", d.split("==")[0], d if d in da else "—", d if d in db else "—")
+    ma, mb = _last_metrics(_run_path(ctx, root, a)), _last_metrics(_run_path(ctx, root, b))
+    for k in sorted(set(ma) | set(mb)):
+        add("metric", k, ma.get(k, "—"), mb.get(k, "—"))
+    if as_json:
+        out = [{"section": s, "key": k, "a": va, "b": vb, "same": va == vb} for s, k, va, vb in rows]
+        click.echo(json.dumps({"a": a["run_id"], "b": b["run_id"], "rows": out}, indent=1, default=str))
+        return
+    t = _table("", "key", a["run_id"], b["run_id"])
+    shown = 0
+    for s, k, va, vb in rows:
+        if va == vb and not show_all and s != "run":
+            continue
+        style = "dim" if va == vb else "yellow"
+        t.add_row(s, k, f"[{style}]{va}[/]", f"[{style}]{vb}[/]")
+        shown += 1
+    con = _console()
+    con.print(t)
+    differ = sum(1 for _, _, va, vb in rows if va != vb)
+    con.print(f"\n{differ} of {len(rows)} rows differ" + ("" if show_all else " (equal rows hidden; --all shows them)"))
 
 
 @main.group()

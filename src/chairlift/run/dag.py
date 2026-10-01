@@ -17,6 +17,7 @@ Two hashes identify work:
 from __future__ import annotations
 
 import datetime as dt
+import functools
 import hashlib
 import json
 import os
@@ -370,7 +371,7 @@ class Pipeline:
             "data": {k: str(v) for k, v in sorted(self.data.items())},  # where the data was here; not hashed
             "stages": stages,
             "code": code_identity(),
-            "environment": _environment(),
+            "environment": environment(),
             "status": "running",
         }
 
@@ -385,16 +386,43 @@ class Pipeline:
         return self.store.get(report.results[name].output)
 
 
-def _environment() -> dict[str, Any]:
-    from importlib.metadata import PackageNotFoundError, version
+@functools.cache
+def environment() -> dict[str, Any]:
+    """What decides whether a re-run can give identical bytes; `hash` summarizes it and `rerun` compares it.
 
-    packages: dict[str, str] = {}
-    for name in ("chairlift", "polars", "numpy", "click"):
-        try:
-            packages[name] = version(name)
-        except PackageNotFoundError:
-            packages[name] = "absent"
-    return {"python": platform.python_version(), "platform": platform.platform(), "packages": packages}
+    The hash covers the interpreter, the machine architecture, every installed distribution and version, and the code
+    identity (commit + dirty flag). The nearest uv.lock is recorded beside it for reference, not hashed: the installed
+    set is what actually ran.
+    """
+    from importlib.metadata import distributions
+
+    dists = sorted({f"{d.metadata['Name'].lower()}=={d.version}" for d in distributions() if d.metadata["Name"]})
+    core = {
+        "python": platform.python_version(),
+        "implementation": platform.python_implementation(),
+        "machine": platform.machine(),
+        "code": code_identity(),
+        "distributions": dists,
+    }
+    digest = hashlib.sha256(json.dumps(core, sort_keys=True).encode()).hexdigest()
+    picked = ("chairlift", "polars", "numpy", "click", "msgspec", "blake3")
+    packages = {n: next((d.split("==")[1] for d in dists if d.split("==")[0] == n), "absent") for n in picked}
+    return {
+        "hash": digest,
+        "python": core["python"],
+        "platform": platform.platform(),
+        "packages": packages,
+        "distributions": dists,
+        "uv_lock": _uv_lock(),
+    }
+
+
+def _uv_lock() -> str | None:
+    for d in (Path.cwd(), *Path.cwd().parents):
+        f = d / "uv.lock"
+        if f.is_file():
+            return hashlib.sha256(f.read_bytes()).hexdigest()
+    return None
 
 
 _Frame = _pl.DataFrame

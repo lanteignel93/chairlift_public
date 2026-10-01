@@ -90,3 +90,16 @@ def test_config_init_writes_a_starter_and_refuses_to_overwrite(tmp_path: Path):
         assert Path("chairlift.toml").read_text().startswith("# chairlift site configuration")
         assert runner.invoke(main, ["config", "init", "--project"]).exit_code == 2
         assert runner.invoke(main, ["config", "check"]).exit_code == 0  # the starter itself is valid
+
+
+def test_rerun_and_compare_find_runs_under_the_configured_home(tmp_path: Path):
+    env = machine_env(tmp_path, "m1")
+    cli(env, "run", TOY, "--set", "window=2", cwd=tmp_path)
+    cli(env, "run", TOY, "--set", "window=4", cwd=tmp_path)
+    runs = sorted((tmp_path / "m1" / "chairlift_home" / "studies" / "toy" / "runs").glob("*Z-*.json"))
+    a, b = (json.loads(p.read_text())["run_id"] for p in runs)
+    out = cli(env, "rerun", a, "--json", cwd=tmp_path)
+    assert out.exit_code == 0 and json.loads(out.output)["ok"]
+    assert len(list((tmp_path / "m1" / "chairlift_home" / "studies" / "toy" / "runs").glob("*Z-*.json"))) == 2
+    rows = json.loads(cli(env, "compare", a, b, "--json", cwd=tmp_path).output)["rows"]
+    assert {(r["key"], r["a"], r["b"]) for r in rows if r["section"] == "params"} == {("window", 2, 4)}

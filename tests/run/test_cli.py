@@ -186,3 +186,69 @@ def test_sweep_validates_every_cell_before_running_any(tmp_path):
     out = CliRunner().invoke(main, ["sweep", _exp(tmp_path, '[sweep]\nwindow = [1, "x"]\n'), "--root", str(root)])
     assert out.exit_code == 2 and "window='x'" in out.output
     assert not (root / "runs").exists()
+
+
+# ---- rerun and compare ---------------------------------------------------------------------------------------------
+
+
+def _records(root):
+    return sorted((json.loads(p.read_text()) for p in (root / "runs").glob("*.json")), key=lambda r: r["run_id"])
+
+
+def test_rerun_reproduces_a_recorded_run_bit_for_bit_from_scratch(tmp_path):
+    root = tmp_path / "toy"
+    invoke("run", TOY, "--root", str(root), "--set", "window=3")
+    rec = _records(root)[-1]
+    into = tmp_path / "again"
+    out = invoke("rerun", rec["run_id"][:22], "--root", str(root), "--into", str(into), "--json")
+    assert out.exit_code == 0
+    res = json.loads(out.output)
+    assert res["ok"] and len(res["stages"]) == 7 and all(s["match"] for s in res["stages"])
+    again = _records(into)[-1]
+    assert again["meta"]["rerun_of"] == rec["run_id"] and set(again["results"]) == set(rec["results"])
+    assert {r["status"] for r in again["results"].values()} == {"ran"}  # nothing reused: a fresh root
+
+
+def test_rerun_fails_when_the_signature_no_longer_matches(tmp_path):
+    root = tmp_path / "toy"
+    invoke("run", TOY, "--root", str(root))
+    rec = _records(root)[-1]
+    rec["meta"]["params"] = {"window": 9}  # as if the study definition had moved on
+    (root / "runs" / f"{rec['run_id']}.json").write_text(json.dumps(rec))
+    out = CliRunner().invoke(main, ["rerun", rec["run_id"], "--root", str(root)])
+    assert out.exit_code == 1 and "signature differs" in out.output and "features" in out.output
+
+
+def test_rerun_warns_on_a_different_environment_and_detects_a_changed_output(tmp_path):
+    root = tmp_path / "toy"
+    invoke("run", TOY, "--root", str(root))
+    rec = _records(root)[-1]
+    rec["environment"]["hash"] = "0" * 64
+    rec["results"]["report"]["output"] = "json:" + "f" * 64
+    (root / "runs" / f"{rec['run_id']}.json").write_text(json.dumps(rec))
+    out = CliRunner().invoke(main, ["rerun", rec["run_id"], "--root", str(root)])
+    assert out.exit_code == 1 and "environment differs" in out.output and "DIFFERS" in out.output
+    assert "NOT reproduced" in out.output
+
+
+def test_rerun_refuses_a_non_empty_directory(tmp_path):
+    root = tmp_path / "toy"
+    invoke("run", TOY, "--root", str(root))
+    out = CliRunner().invoke(main, ["rerun", _records(root)[-1]["run_id"], "--root", str(root), "--into", str(root)])
+    assert out.exit_code == 2 and "not empty" in out.output
+
+
+def test_compare_names_what_differs_between_two_runs(tmp_path):
+    root = tmp_path / "toy"
+    invoke("run", TOY, "--root", str(root), "--set", "window=1")
+    invoke("run", TOY, "--root", str(root), "--set", "window=3")
+    a, b = (r["run_id"] for r in _records(root))
+    rows = json.loads(invoke("compare", a, b, "--root", str(root), "--json").output)["rows"]
+    differ = {(r["section"], r["key"]) for r in rows if not r["same"]}
+    assert ("params", "window") in differ and ("spec", "features") in differ
+    assert ("spec", "sources") not in differ and ("output", "sources") not in differ
+    assert ("output", "evaluate") in differ
+    assert any(s == "metric" for s, _ in differ)  # the fit's slopes and the OOS IC moved
+    assert not any(s == "env" for s, _ in differ)  # same process, same environment
+    text = invoke("compare", a, b, "--root", str(root)).output
+    assert "window" in text and "rows differ" in text
