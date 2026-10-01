@@ -101,6 +101,24 @@ def _defined_in_own_module(f: Any, code: Any) -> bool:
     return isinstance(path, str) and os.path.realpath(path) == os.path.realpath(code.co_filename)
 
 
+def _library_roots() -> tuple[str, ...]:
+    import sysconfig
+
+    roots = {sysconfig.get_paths()[k] for k in ("stdlib", "platstdlib", "purelib", "platlib")}
+    return tuple(os.path.realpath(r) + os.sep for r in roots if r)
+
+
+_LIBS = _library_roots()
+
+
+def _user_file(path: str | None) -> bool:
+    """Code a study author or chairlift owns: on disk, and not in the standard library or installed site-packages."""
+    if not path or path.startswith("<"):
+        return False
+    real = os.path.realpath(path)
+    return not real.startswith(_LIBS)
+
+
 def code_digest(fn: Callable[..., Any]) -> str:
     """sha256 over the source of a stage function and of every function or class it reaches by name, transitively,
     within the stage's own module and within chairlift. Editing study code or chairlift's research code re-runs
@@ -121,14 +139,23 @@ def code_digest(fn: Callable[..., Any]) -> str:
         return out
 
     def ours(obj: Any, module: str | None) -> bool:
-        m = getattr(obj, "__module__", None) or ""
-        return m == module or m == "chairlift" or m.startswith("chairlift.")
+        if isinstance(obj, type):
+            try:
+                return _user_file(inspect.getsourcefile(obj))
+            except TypeError:
+                return False
+        code = getattr(obj, "__code__", None)
+        return code is not None and _user_file(code.co_filename)
 
     def visit_class(c: type, module: str | None) -> None:
         if id(c) in done:
             return
         done.add(id(c))
-        key = f"{'<study>' if c.__module__ == module else c.__module__}.{c.__qualname__}"
+        try:
+            label = os.path.basename(inspect.getsourcefile(c) or c.__module__)
+        except TypeError:
+            label = c.__module__
+        key = f"{label}:{c.__qualname__}"
         try:
             seen.setdefault(key, set()).add(inspect.getsource(c))
         except (OSError, TypeError):
@@ -147,9 +174,8 @@ def code_digest(fn: Callable[..., Any]) -> str:
             # digest depend on which class the walk met first). The class source already covers what they derive from
             return
         done.add(id(code))
-        mod = getattr(f, "__module__", "") or ""
-        label = "<study>" if mod == module else mod  # the loader names a study module differently (CLI, runpy, import)
-        key = f"{label}.{getattr(f, '__qualname__', '')}:{code.co_firstlineno}"
+        # labelled by file name, not module name: the loader names a study module differently (CLI, runpy, import)
+        key = f"{os.path.basename(code.co_filename)}:{getattr(f, '__qualname__', '')}:{code.co_firstlineno}"
         try:
             seen.setdefault(key, set()).add(inspect.getsource(f))
         except (OSError, TypeError):

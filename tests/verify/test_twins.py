@@ -59,6 +59,7 @@ def test_equity_ls_recovers_the_signal_flags_the_leak_and_finds_nothing_in_the_n
 def test_spy_timing_on_the_null_twin_does_not_beat_buy_and_hold(tmp_path: Path):
     study = runpy.run_path(str(EXAMPLES / "spy_timing.py"))
     p = study["pipeline"](tmp_path / "r", beta=0.0)
-    e = p.load("evaluate", p.run())
-    assert e["timing_vs_hold"]["d_sharpe_ci"][0] < 0 < e["timing_vs_hold"]["d_sharpe_ci"][1]
-    assert abs(e["ic"]["oos_ic_all"]) < 0.03
+    r = p.run()
+    d = p.load("report", r)["books"]["ridge"]["vs_buy_and_hold"]
+    assert d["d_sharpe_ci"][0] < 0 < d["d_sharpe_ci"][1]
+    assert abs(p.load("eval_ridge", r)["ic"]["oos_ic_all"]) < 0.03

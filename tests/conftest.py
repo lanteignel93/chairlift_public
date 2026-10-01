@@ -33,6 +33,7 @@ TIERS = [
     "ledger",
     "report",
     "run",
+    "study",
     "verify",
     "properties",
     "golden",
@@ -50,6 +51,7 @@ WITHIN = {
     "book": ["test_quantile", "test_timeseries"],
     "evaluate": ["test_daily", "test_deflated"],
     "ledger": ["test_trials", "test_holdout"],
+    "study": ["test_build"],
     "verify": ["test_toy", "test_twins"],
     "properties": ["test_spec_properties", "test_dag_properties"],
 }
