@@ -165,6 +165,18 @@ def _build(
     return b
 
 
+def _instantiate(factory: Any, root: Path, params: dict[str, Any]) -> Any:
+    """`factory(root, **params) -> Pipeline`, or `factory(**params) -> Study` (built over `root`)."""
+    import inspect
+
+    from chairlift.study.build import Study
+
+    first = next(iter(inspect.signature(factory).parameters.values()), None)
+    takes_root = first is not None and first.kind in (first.POSITIONAL_ONLY, first.POSITIONAL_OR_KEYWORD)
+    out = factory(root, **params) if takes_root else factory(**params)
+    return out.pipeline(root) if isinstance(out, Study) else out
+
+
 def _build_ref(
     ctx: Ctx, study: str, root: Path | None, raw_params: dict[str, Any], name: str | None, *, shared: bool
 ) -> Built:
@@ -184,12 +196,13 @@ def _build_ref(
         assert root is not None
         cache = root / "cache"
     try:
-        pipe = factory(root, **params)
+        pipe = _instantiate(factory, root, params)
     except TypeError as exc:
         raise click.UsageError(f"the factory rejected the parameters: {exc}") from exc
     if not isinstance(pipe, Pipeline):
-        raise click.UsageError(f"{study} returned {type(pipe).__qualname__}, not a Pipeline")
+        raise click.UsageError(f"{study} returned {type(pipe).__qualname__}, not a Pipeline or a Study")
     pipe = pipe.rebase(root, store, data=cfg.data, cache=cache)  # data roots come from this machine's config
+    pipe.workers = cfg.compute.workers
     return Built(pipe, sname, root, store is not None, study, params, headline=getattr(module, "HEADLINE", None))
 
 

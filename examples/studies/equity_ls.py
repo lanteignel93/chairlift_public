@@ -1,8 +1,8 @@
 """Equity long/short on a synthetic twin, declared as a Study: monthly cross-section, sector neutralisation, a decile
 book.
 
-    chairlift run examples/studies/equity_ls.py:pipeline
-    chairlift run examples/studies/equity_ls.py:pipeline --set fundamentals=peek   # the look-ahead leak, on purpose
+    chairlift run examples/studies/equity_ls.py:study
+    chairlift run examples/studies/equity_ls.py:study --set fundamentals=peek   # the look-ahead leak, on purpose
 
 The twin plants two signals with known IC and a fundamental published two months late (`chairlift.verify.twins`).
 With `fundamentals="published"` the study uses what was knowable at t0; with `"peek"` it uses the value-date series,
@@ -12,7 +12,6 @@ and the OOS IC shows how much a release-lag bug would flatter the book.
 from __future__ import annotations
 
 import datetime as dt
-from pathlib import Path
 from typing import Literal
 
 import polars as pl
@@ -23,7 +22,6 @@ from chairlift.evaluate.daily import DailyStatsSpec
 from chairlift.features.cross_section import demean, percentile_rank, rank_of_rows, zscore
 from chairlift.learn.fit import FitSpec
 from chairlift.learn.models import LightGBMSpec, RidgeSpec
-from chairlift.run.dag import Pipeline
 from chairlift.schedule.walkforward import WalkForward
 from chairlift.study.build import CrossSectionBook, Ensemble, FeatureSet, Model, Source, Study
 from chairlift.verify.twins import CrossSectionTwin, cross_section_twin
@@ -112,7 +110,3 @@ def study(
         book=CrossSectionBook(spec=QuantileBook(q=0.1), frame="frame", paths=one_period_paths, per_position=True),
         stats=DailyStatsSpec(periods=12, block=3, min_per_year=6, min_per_half=3, n_boot=2000, seed=1),
     )
-
-
-def pipeline(root: Path, **params: object) -> Pipeline:
-    return study(**params).pipeline(root)  # pyright: ignore[reportArgumentType]

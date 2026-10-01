@@ -9,6 +9,7 @@ mutated after hashing would let the cache drift from the object.
 
 from __future__ import annotations
 
+import copyreg
 import dataclasses
 import datetime as dt
 import enum
@@ -35,6 +36,19 @@ def _freeze(value: Any) -> Any:
         items = cast("Mapping[Any, Any]", value)
         return MappingProxyType({k: _freeze(v) for k, v in items.items()})
     return value
+
+
+def _mappingproxy(d: dict[Any, Any]) -> MappingProxyType[Any, Any]:
+    return MappingProxyType(d)
+
+
+def _reduce_mappingproxy(m: MappingProxyType[Any, Any]) -> tuple[Any, tuple[Any, ...]]:
+    return _mappingproxy, (dict(m),)
+
+
+# a spec's mappings are frozen as MappingProxyType, which pickle refuses; specs cross process boundaries (parallel
+# folds), so the proxy is pickled as the dict it wraps and rebuilt as a proxy
+copyreg.pickle(MappingProxyType, _reduce_mappingproxy)
 
 
 @dataclass_transform(kw_only_default=True, frozen_default=True)

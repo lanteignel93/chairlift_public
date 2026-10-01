@@ -41,6 +41,7 @@ from chairlift.data.refs import StatCache, bind
 from chairlift.data.store import ArtifactStore
 from chairlift.ledger.holdout import bind_ledger
 from chairlift.ledger.trials import Headline, Ledger, dig
+from chairlift.run.compute import bind_compute
 from chairlift.run.events import EventLog, Listener, bound
 
 Status = Literal["hit", "ran"]
@@ -307,6 +308,7 @@ class Pipeline:
         self.root = Path(root)
         self.data: dict[str, Path] = {k: Path(v) for k, v in (data or {}).items()}
         self.ledger_path = self.root / "ledger.jsonl"  # the study's trials and holdout opening
+        self.workers = 1  # worker processes stages may use (a site setting, never in a key)
         self.cache = StatCache(Path(cache)) if cache is not None else None
         if store is None:
             self.store = ArtifactStore(self.root / "store")
@@ -325,13 +327,15 @@ class Pipeline:
     ) -> Pipeline:
         """The same stages over another run root, store and data roots (how the CLI places a study on this machine).
         Data roots and cache not given are kept."""
-        return Pipeline(
+        p = Pipeline(
             self.stages.values(),
             root,
             store,
             data=self.data if data is None else data,
             cache=cache if cache is not None else (self.cache.directory if self.cache else None),
         )
+        p.workers = self.workers
+        return p
 
     def _needed(self, targets: Iterable[str] | None) -> list[str]:
         if targets is None:
@@ -508,7 +512,12 @@ class Pipeline:
             t0, c0 = time.perf_counter(), time.process_time()
             try:
                 kwargs = {i: self.store.get(refs[i]) for i in stage.inputs}
-                with bound(log, name), bind(self.data, self.cache), bind_ledger(self.ledger_path):
+                with (
+                    bound(log, name),
+                    bind(self.data, self.cache),
+                    bind_ledger(self.ledger_path),
+                    bind_compute(self.workers),
+                ):
                     result = stage.fn(**kwargs) if stage.spec is None else stage.fn(stage.spec, **kwargs)
                 ref = self.store.put(result)
             except BaseException as exc:

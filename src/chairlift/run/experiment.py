@@ -130,10 +130,13 @@ def _table(raw: Mapping[str, Any], key: str, path: Path) -> dict[str, Any]:
 def validate_params(factory: Callable[..., Any], params: Mapping[str, Any]) -> dict[str, Any]:
     """`params` converted to the factory's annotated types; every problem is named before anything runs.
 
-    The factory's first positional parameter is the run root, supplied by chairlift; the rest are the study's knobs.
+    A pipeline factory's first positional parameter is the run root, supplied by chairlift; a Study factory takes
+    keyword parameters only. Either way the keyword parameters are the study's knobs.
     """
     sig = inspect.signature(factory)
-    knobs = list(sig.parameters.values())[1:]
+    params_ = list(sig.parameters.values())
+    takes_root = bool(params_) and params_[0].kind in (params_[0].POSITIONAL_ONLY, params_[0].POSITIONAL_OR_KEYWORD)
+    knobs = params_[1:] if takes_root else params_  # a Study factory takes keyword parameters only
     try:
         hints = get_type_hints(factory)
     except (NameError, TypeError):

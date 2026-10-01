@@ -44,7 +44,16 @@ TIERS = [
 WITHIN = {
     "core": ["test_spec", "test_identity", "test_config", "test_secrets"],
     "data": ["test_store", "test_manifest", "test_refs"],
-    "run": ["test_dag", "test_events", "test_signature", "test_live", "test_experiment", "test_cli", "test_wiring"],
+    "run": [
+        "test_dag",
+        "test_compute",
+        "test_events",
+        "test_signature",
+        "test_live",
+        "test_experiment",
+        "test_cli",
+        "test_wiring",
+    ],
     "schedule": ["test_walkforward"],
     "features": ["test_cross_section", "test_time_series"],
     "learn": ["test_models", "test_selection", "test_fit"],

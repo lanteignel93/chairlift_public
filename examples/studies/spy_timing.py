@@ -1,7 +1,7 @@
 """SPY timing on a synthetic twin, declared as a Study: one instrument, daily, a scaled position against buy-and-hold.
 
-    chairlift run examples/studies/spy_timing.py:pipeline
-    chairlift run examples/studies/spy_timing.py:pipeline --set beta=0.0     # the null twin: nothing to find
+    chairlift run examples/studies/spy_timing.py:study
+    chairlift run examples/studies/spy_timing.py:study --set beta=0.0     # the null twin: nothing to find
 
 The twin plants a daily drift (the equity premium, found only through the ridge intercept) and small, persistent
 predictability from two lagged states among five noise states (`chairlift.verify.twins`).
@@ -10,13 +10,11 @@ predictability from two lagged states among five noise states (`chairlift.verify
 from __future__ import annotations
 
 import datetime as dt
-from pathlib import Path
 
 from chairlift.book.timeseries import SignalBook
 from chairlift.evaluate.daily import DailyStatsSpec
 from chairlift.learn.fit import FitSpec
 from chairlift.learn.models import RidgeSpec
-from chairlift.run.dag import Pipeline
 from chairlift.schedule.walkforward import WalkForward
 from chairlift.study.build import FeatureSet, Model, Source, Study, TimeSeriesBook
 from chairlift.verify.twins import TimeSeriesTwin, time_series_twin
@@ -52,7 +50,3 @@ def study(*, beta: float = 0.05, cost_bp: float = 1.0, seed: int = 11) -> Study:
         ),
         stats=DailyStatsSpec(n_boot=2000, seed=1),
     )
-
-
-def pipeline(root: Path, **params: object) -> Pipeline:
-    return study(**params).pipeline(root)  # pyright: ignore[reportArgumentType]

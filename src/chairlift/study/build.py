@@ -109,6 +109,10 @@ class CrossSectionBook:
     end: Any = None
     per_position: bool = False  # Sharpe of the equal-weight spread (ls_pp) instead of the unit-per-name book
     ic_target: str = "y_rank"
+    frame_for: tuple[tuple[str, str], ...] = ()  # (evaluation name, frame source) where a book uses another universe
+
+    def frame_of(self, name: str) -> str:
+        return dict(self.frame_for).get(name, self.frame)
 
 
 @dataclass(frozen=True)
@@ -148,7 +152,7 @@ class Study:
     def stages(self) -> list[Stage]:
         w, keys = self.schedule, self.keys
         out: list[Stage] = [Stage(s.name, s.fn, s.inputs, spec=s.spec, fingerprint=s.fingerprint) for s in self.sources]
-        out.append(Stage("folds", _folds_stage(self.index), (self.index,), spec=w))
+        out.append(Stage("folds", _folds_stage(self.index, keys), (self.index,), spec=w))
         for m in self.models:
             out.append(Stage(f"fit_{m.name}", _fit_stage(m.panel, w, keys, m.features), (m.panel, "folds"), spec=m.fit))
         for e in self.ensembles:
@@ -165,8 +169,8 @@ class Study:
         if isinstance(self.book, CrossSectionBook):
             b = self.book
             for n in names:
-                p = pred_stage[n]
-                out.append(Stage(f"book_{n}", _cs_book_stage(p, b.frame), (p, b.frame), spec=b.spec))
+                p, fr = pred_stage[n], b.frame_of(n)
+                out.append(Stage(f"book_{n}", _cs_book_stage(p, fr), (p, fr), spec=b.spec))
                 out.append(
                     Stage(
                         f"paths_{n}",
@@ -175,7 +179,7 @@ class Study:
                         fingerprint=b.paths_fingerprint,
                     )
                 )
-                ins = (f"book_{n}", f"paths_{n}", p, b.frame)
+                ins = (f"book_{n}", f"paths_{n}", p, fr)
                 fn = _cs_eval_stage(ins, keys, b.end, b.per_position, b.ic_target)
                 out.append(Stage(f"eval_{n}", fn, ins, spec=self.stats))
         else:
@@ -204,11 +208,11 @@ class _TsEval:
 # ---- stage functions: each a closure over specs and functions only, so captured-value hashing covers it -------------
 
 
-def _folds_stage(index: str) -> Callable[..., dict[str, Any]]:
+def _folds_stage(index: str, keys: tuple[str, ...]) -> Callable[..., dict[str, Any]]:
     def folds(w: WalkForward, **inputs: pl.DataFrame) -> dict[str, Any]:
         frame = inputs[index]
         fs = make_folds(frame, w)
-        table = check_folds(frame, fs, w)
+        table = check_folds(frame, fs, w, keys=keys)
         return {"folds": fold_table_json(fs), "table": table.with_columns(pl.col(pl.Date).cast(pl.String)).to_dicts()}
 
     return folds

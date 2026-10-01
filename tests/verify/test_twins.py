@@ -46,7 +46,7 @@ def test_equity_ls_recovers_the_signal_flags_the_leak_and_finds_nothing_in_the_n
     study = runpy.run_path(str(EXAMPLES / "equity_ls.py"))
 
     def ic(**kw: object) -> float:
-        p = study["pipeline"](tmp_path / "r", **kw)
+        p = study["study"](**kw).pipeline(tmp_path / "r")
         return p.load("eval_ridge", p.run(["eval_ridge"]))["ic"]["oos_ic_mean"]
 
     honest, leak, null = ic(), ic(fundamentals="peek"), ic(signal_ic=0.0)
@@ -58,7 +58,7 @@ def test_equity_ls_recovers_the_signal_flags_the_leak_and_finds_nothing_in_the_n
 
 def test_spy_timing_on_the_null_twin_does_not_beat_buy_and_hold(tmp_path: Path):
     study = runpy.run_path(str(EXAMPLES / "spy_timing.py"))
-    p = study["pipeline"](tmp_path / "r", beta=0.0)
+    p = study["study"](beta=0.0).pipeline(tmp_path / "r")
     r = p.run()
     d = p.load("report", r)["books"]["ridge"]["vs_buy_and_hold"]
     assert d["d_sharpe_ci"][0] < 0 < d["d_sharpe_ci"][1]

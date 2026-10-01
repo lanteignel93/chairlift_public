@@ -112,3 +112,13 @@ def test_unsupported_values_are_rejected():
         spec_hash(m(params={"obj": object()}))
     with pytest.raises(SpecError):
         spec_hash({1: "non-string key"})
+
+
+def test_specs_with_mappings_survive_pickling():
+    import pickle
+
+    from chairlift.learn.models import LightGBMSpec
+
+    s = LightGBMSpec(params={"num_leaves": 8, "n_estimators": 10}, seeds=(0, 1))
+    back = pickle.loads(pickle.dumps(s))
+    assert back == s and spec_hash(back) == spec_hash(s)
