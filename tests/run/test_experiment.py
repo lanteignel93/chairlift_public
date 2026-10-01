@@ -124,7 +124,14 @@ def test_containers_convert_to_their_annotated_shape():
 
 @pytest.mark.parametrize("path", sorted((Path(__file__).parents[2] / "examples" / "experiments").glob("*.toml")))
 def test_shipped_example_experiments_load_and_validate(path: Path):
+    from chairlift.run.cli import _load_factory
+
     exp = load_experiment(path)
-    assert exp.study == "chairlift.verify.toy:pipeline"
+    _, factory = _load_factory(exp.study)
     for cell in exp.cells():
-        validate_params(toy.pipeline, cell)
+        validate_params(factory, cell)
+    if exp.search:
+        from chairlift.search.space import SearchSpace
+
+        for c in SearchSpace.parse(exp.search).candidates():
+            validate_params(factory, exp.params | c)

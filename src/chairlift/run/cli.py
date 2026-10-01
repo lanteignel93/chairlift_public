@@ -474,7 +474,7 @@ def search(
         raise click.UsageError(str(exc)) from exc
     cands = [exp.params | c for c in space.candidates()]
     built = [_build(ctx, str(experiment), root, (), name, cell=c) for c in cands]  # every candidate validated first
-    head = Headline.parse(built[0].headline)
+    head = Headline.parse(exp.search.get("objective") or built[0].headline)  # the search may judge another book
     if head is None or head.daily is None:
         raise click.UsageError("a search needs the study's HEADLINE with a `daily` path (the series it judges)")
     if dry_run:

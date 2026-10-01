@@ -1,7 +1,9 @@
 import json
+from pathlib import Path
 
 from click.testing import CliRunner
 
+from chairlift.ledger.trials import Ledger
 from chairlift.run.cli import main
 
 TOY = "chairlift.verify.toy:pipeline"
@@ -290,3 +292,23 @@ def test_compare_takes_a_reused_stages_metrics_from_the_run_that_built_it(tmp_pa
     rows = json.loads(invoke("compare", a, b, "--root", str(root), "--json").output)["rows"]
     metrics = [r for r in rows if r["section"] == "metric"]
     assert metrics and all(r["same"] and r["b"] != "—" for r in metrics)
+
+
+def test_search_runs_every_candidate_charges_the_ledger_and_judges_the_search(tmp_path):
+    exp = tmp_path / "search.toml"
+    spy = Path(__file__).parents[2] / "examples" / "studies" / "spy_timing.py"
+    exp.write_text(
+        f'study = "{spy}:study"\nreason = "test"\n[search]\nsampler = "grid"\nbudget = 0\n'
+        "[search.params]\nalpha = [0.001, 0.1, 10.0]\n"
+    )
+    root = tmp_path / "r"
+    dry = invoke("search", str(exp), "--root", str(root), "--dry-run").output
+    assert "3 candidate(s)" in dry
+    out = json.loads(invoke("search", str(exp), "--root", str(root), "--json").stdout)
+    assert len(out["candidates"]) == 3 and out["deflated"]["n_trials"] == 3
+    assert "selected_oos_sharpe" in out["walk_forward_selection"] and out["pbo"]["pbo"] is not None
+    assert len(Ledger(root / "ledger.jsonl").trials()) == 3
+
+
+def _json_tail(text: str) -> dict:
+    return json.loads(text[text.index("{") :])

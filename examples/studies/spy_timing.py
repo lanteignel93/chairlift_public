@@ -20,12 +20,18 @@ from chairlift.study.build import FeatureSet, Model, Source, Study, TimeSeriesBo
 from chairlift.verify.twins import TimeSeriesTwin, time_series_twin
 
 STUDY_NAME = "spy_timing"
-HEADLINE = {"stage": "eval_ridge", "sharpe": "book.sharpe", "n_obs": "book.n_days"}
+HEADLINE = {
+    "stage": "eval_ridge",
+    "sharpe": "book.sharpe",
+    "n_obs": "book.n_days",
+    "daily": "book.daily",
+    "value": "pnl",
+}
 FEATURES = ("x_sig0", "x_sig1", "x_noise0", "x_noise1", "x_noise2", "x_noise3", "x_noise4")
 
 
-def study(*, beta: float = 0.05, cost_bp: float = 1.0, seed: int = 11) -> Study:
-    ridge = FitSpec(model=RidgeSpec(alpha=1e-2, intercept=True), target="y", rank_target="y", cross_section=False)
+def study(*, beta: float = 0.05, cost_bp: float = 1.0, seed: int = 11, alpha: float = 1e-2) -> Study:
+    ridge = FitSpec(model=RidgeSpec(alpha=alpha, intercept=True), target="y", rank_target="y", cross_section=False)
     return Study(
         name=STUDY_NAME,
         sources=(

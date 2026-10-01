@@ -54,7 +54,7 @@ class SearchSpace:
 
     @staticmethod
     def parse(raw: Mapping[str, Any]) -> SearchSpace:
-        unknown = set(raw) - {"params", "sampler", "budget", "seed"}
+        unknown = set(raw) - {"params", "sampler", "budget", "seed", "objective"}
         if unknown:
             raise SearchError(f"[search]: unknown key(s) {sorted(unknown)}")
         params: dict[str, tuple[Any, ...] | Range] = {}

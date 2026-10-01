@@ -1,0 +1,16 @@
+# A search on the equity twin: 16 random candidates over the ridge penalty, the book's quantile and the trees' leaves.
+#   chairlift search examples/experiments/equity-search.toml --dry-run
+#   chairlift search examples/experiments/equity-search.toml
+# The twin's answer is known (two planted signals), so the search's judgment can be checked against it.
+study  = "../studies/equity_ls.py:study"
+reason = "search demo on a twin with a known answer"
+
+[search]
+sampler = "random"
+budget  = 16
+seed    = 1
+
+[search.params]
+alpha  = { low = 1e-4, high = 10.0, log = true }
+q      = [0.05, 0.1, 0.2]
+leaves = { low = 4, high = 32, int = true }

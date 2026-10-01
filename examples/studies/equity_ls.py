@@ -27,7 +27,14 @@ from chairlift.study.build import CrossSectionBook, Ensemble, FeatureSet, Model,
 from chairlift.verify.twins import CrossSectionTwin, cross_section_twin
 
 STUDY_NAME = "equity_ls"
-HEADLINE = {"stage": "eval_ensemble", "sharpe": "ls.sharpe", "n_obs": "ls.n_days", "periods": 12}
+HEADLINE = {
+    "stage": "eval_ensemble",
+    "sharpe": "ls.sharpe",
+    "n_obs": "ls.n_days",
+    "periods": 12,
+    "daily": "daily",
+    "value": "ls",
+}
 KEYS = ("root", "t0", "exit_date", "y_year", "y", "sector")
 
 
@@ -72,11 +79,14 @@ def study(
     fundamentals: Literal["published", "peek"] = "published",
     signal_ic: float = 0.06,
     seed: int = 7,
+    alpha: float = 1e-2,
+    q: float = 0.1,
+    leaves: int = 8,
 ) -> Study:
     fill = 0.0 if neutral else 0.5
     gbm = {
         "n_estimators": 200,
-        "num_leaves": 8,
+        "num_leaves": leaves,
         "learning_rate": 0.05,
         "min_child_samples": 200,
         "feature_fraction": 0.8,
@@ -97,7 +107,7 @@ def study(
         index="panel",
         schedule=WalkForward(start=dt.date(2012, 1, 1), first_test_year=2016, mode="expanding", embargo=1),
         models=(
-            Model("ridge", FitSpec(model=RidgeSpec(alpha=1e-2), fill=fill), panel="panel", features=features),
+            Model("ridge", FitSpec(model=RidgeSpec(alpha=alpha), fill=fill), panel="panel", features=features),
             Model(
                 "gbm",
                 FitSpec(model=LightGBMSpec(params=gbm, seeds=(0, 1, 2), threads=4), fill=fill),
@@ -107,6 +117,6 @@ def study(
         ),
         ensembles=(Ensemble("ensemble", ("ridge", "gbm")),),
         evaluate=("ridge", "ensemble"),
-        book=CrossSectionBook(spec=QuantileBook(q=0.1), frame="frame", paths=one_period_paths, per_position=True),
+        book=CrossSectionBook(spec=QuantileBook(q=q), frame="frame", paths=one_period_paths, per_position=True),
         stats=DailyStatsSpec(periods=12, block=3, min_per_year=6, min_per_half=3, n_boot=2000, seed=1),
     )
