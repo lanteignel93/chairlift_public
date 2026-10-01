@@ -120,13 +120,9 @@ The reader (`chairlift.run.events.read_events(path, offset)`) returns complete l
 still being written for the next read, and skips a corrupt line instead of failing, so any tool can tail the file
 safely. `peak_rss_mb` is the process's peak resident memory so far, so it never decreases over a run.
 
-## Planned
+## Unattended runs, reports and alerts
 
-These are designed (`plans/speculative/chairlift-observability.md`) and not built:
-- static HTML run reports
-- `chairlift submit`: a systemd unit per run, with `sd_notify` watchdog heartbeats and an `OnFailure=` hook
-- alert rules routed to the sinks in `[alerts]`
-
-The `[systemd]` and `[alerts]` settings are already parsed and recorded with every run.
+`chairlift submit`, `chairlift report` and `chairlift alerts check` are covered in
+[9](09-studies-and-search.md#running-and-watching-unattended).
 
 Next: [identity and reproducibility](05-reproducibility.md).

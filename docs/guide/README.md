@@ -43,23 +43,23 @@ machine for the same study, parameters, code versions and data.
 | [6. Writing a study](06-writing-a-study.md) | factories, stages, specs, data references, progress and metrics |
 | [7. Experiments and sweeps](07-experiments.md) | experiment files, typed parameters, `sweep` |
 | [8. CLI reference](08-cli-reference.md) | every command and option, generated from the code |
+| [9. Studies, search and keeping score](09-studies-and-search.md) | declared studies, models and books, the ledger, the holdout gate, search, twins, unattended runs |
 
 For the meaning of each output file field by field, see [how to read the outputs](../how-to-read.md); for why things
 are the way they are, [decisions](../decisions.md).
 
 ## What exists today and what does not
 
-Built and tested: the content store and manifest, the DAG runner, signatures and run records, layered site
-configuration with provenance, secrets, data references with content fingerprints, experiment files and sweeps, the
-environment hash, `rerun`, `compare`, the event stream, the live view, `watch` and `status`.
+Built and tested:
+- **The runner:** the content store and manifest, the DAG runner, signatures and run records; layered site
+  configuration with provenance, secrets, data references with content fingerprints; experiment files and sweeps;
+  the environment hash, `rerun` and `compare`.
+- **Monitoring:** the event stream, the live view, `watch` and `status`; static HTML reports; `submit` under
+  systemd with a progress-tied watchdog; alerts.
+- **The research layer ([9](09-studies-and-search.md)):** declared studies; walk-forward folds that assert their
+  embargo, parallel per fold; ridge, LightGBM, regime rules and in-fold cluster selection; ensembles; quantile and
+  signal books; daily-book statistics with block-bootstrap intervals and concentration checks; the trial ledger,
+  deflated Sharpe and the holdout gate; search with walk-forward selection and PBO; synthetic twins.
 
-Built since, and shown in `examples/gallery/` (slalom and VXX), not yet covered page by page:
-- walk-forward folds that assert their embargo
-- ridge and LightGBM with in-fold selection, and the ensemble
-- quantile and signal books
-- daily-book statistics with block-bootstrap intervals
-
-Planned, and not described here as if it existed: the remaining study protocols (point-in-time data access, the
-holdout gate, the trial ledger), static
-HTML reports, `chairlift submit` under systemd with a watchdog, and alert rules. The site config already accepts
-`[compute]`, `[systemd]` and `[alerts]` settings and records them with every run; nothing consumes them yet.
+Not built yet: point-in-time universe helpers, gates that block a holdout opening automatically, and search over
+model families beyond a study's own knobs.
