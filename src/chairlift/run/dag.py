@@ -97,7 +97,9 @@ class RunReport:
 
 
 class Pipeline:
-    def __init__(self, stages: Iterable[Stage], root: Path | str) -> None:
+    def __init__(self, stages: Iterable[Stage], root: Path | str, store: Path | str | None = None) -> None:
+        """`root` holds this study's run records. `store` is the content store + manifest; given a shared store,
+        every study on the machine reuses every other study's stages. Without one the root is self-contained."""
         self.stages = {s.name: s for s in stages}
         for s in self.stages.values():
             missing = [i for i in s.inputs if i not in self.stages]
@@ -108,8 +110,16 @@ class Pipeline:
         except CycleError as exc:
             raise ValueError(f"pipeline has a cycle: {exc.args[1]}") from exc
         self.root = Path(root)
-        self.store = ArtifactStore(self.root / "store")
-        self.manifest = Manifest(self.root / "manifest.jsonl")
+        if store is None:
+            self.store = ArtifactStore(self.root / "store")
+            self.manifest = Manifest(self.root / "manifest.jsonl")
+        else:
+            self.store = ArtifactStore(Path(store))
+            self.manifest = Manifest(Path(store) / "manifest.jsonl")
+
+    def rebase(self, root: Path | str, store: Path | str | None = None) -> Pipeline:
+        """The same stages over another run root and store (how the CLI places a study under the configured home)."""
+        return Pipeline(self.stages.values(), root, store)
 
     def _needed(self, targets: Iterable[str] | None) -> list[str]:
         if targets is None:
@@ -127,7 +137,12 @@ class Pipeline:
 
     def _fingerprints(self, names: Iterable[str]) -> dict[str, str]:
         """Each source's fingerprint, computed once per call (a fingerprint may hash files)."""
-        return {n: self.stages[n].fingerprint() for n in names if self.stages[n].fingerprint is not None}  # pyright: ignore[reportOptionalCall]
+        out: dict[str, str] = {}
+        for n in names:
+            fp = self.stages[n].fingerprint
+            if fp is not None:
+                out[n] = fp()
+        return out
 
     def signature(self, targets: Iterable[str] | None = None) -> Signature:
         """The inputs-only identity of a run of `targets`: same definition and data → same signature anywhere."""

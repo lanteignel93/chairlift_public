@@ -146,3 +146,43 @@ def test_manifest_records_reason_and_code_identity(tmp_path):
     recs = p.manifest.records()
     assert {r.stage for r in recs} == set(p.stages)
     assert all(r.reason == "initial build" and r.code.startswith("chairlift") for r in recs)
+
+
+def test_rebase_shares_one_store_across_roots(tmp_path):
+    p, _ = build(tmp_path / "a")
+    shared = tmp_path / "shared"
+    first = p.rebase(tmp_path / "study1", shared).run()
+    assert set(first.ran()) == set(p.stages)
+    second = p.rebase(tmp_path / "study2", shared).run()
+    assert second.ran() == []  # a different study root, the same store: everything reused
+    assert (shared / "manifest.jsonl").exists() and not (tmp_path / "study2" / "store").exists()
+
+
+def test_fingerprint_is_called_once_per_run(tmp_path):
+    calls = []
+
+    def fp():
+        calls.append(1)
+        return "v1"
+
+    stages = [Stage("src", lambda: RAW, fingerprint=fp), Stage("next", lambda src: src.head(2), ("src",))]
+    Pipeline(stages, tmp_path).run()
+    assert len(calls) == 1  # computed once for the run, shared by the signature and every stage key
+
+
+def test_a_failing_stage_records_nothing_for_itself(tmp_path):
+    def boom(sources):
+        raise RuntimeError("no")
+
+    stages = [Stage("sources", lambda: RAW, fingerprint=lambda: "v"), Stage("bad", boom, ("sources",))]
+    p = Pipeline(stages, tmp_path)
+    with pytest.raises(RuntimeError):
+        p.run()
+    assert {r.stage for r in p.manifest.records()} == {"sources"}  # the failed stage has no record to reuse
+
+
+def test_plan_and_run_agree_on_a_cold_and_a_warm_store(tmp_path):
+    p, _ = build(tmp_path)
+    assert {i.status for i in p.plan()} == {"run", "upstream"}
+    p.run()
+    assert {i.status for i in build(tmp_path)[0].plan()} == {"hit"}

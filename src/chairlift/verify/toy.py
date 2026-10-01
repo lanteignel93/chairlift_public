@@ -22,6 +22,8 @@ import polars as pl
 from chairlift.core.spec import spec
 from chairlift.run.dag import Pipeline, Stage
 
+STUDY_NAME = "toy"
+
 
 class Fold(TypedDict):
     train_end: int

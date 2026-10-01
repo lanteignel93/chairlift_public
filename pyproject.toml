@@ -6,9 +6,12 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "click>=8.1",
+    "msgspec>=0.22",
     "numpy>=1.26",
+    "platformdirs>=4.12",
     "polars>=1.21,<2",
     "rich>=13",
+    "tomli-w>=1.2",
 ]
 
 [project.scripts]
@@ -42,7 +45,13 @@ ignore = ["RUF001", "RUF002", "RUF003"]  # × − → are intentional in docs an
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-q --cov=chairlift --cov-branch --cov-report=term-missing:skip-covered"  # add -n 4 for xdist
+addopts = "-q --import-mode=importlib --strict-markers --cov=chairlift --cov-branch --cov-report=term-missing:skip-covered"  # add -n 4 for xdist
+markers = [
+    "property: hypothesis invariants (tests/properties)",
+    "golden: content snapshots of whole pipelines (tests/golden)",
+    "walkthrough: debug walkthroughs, asserted (tests/walkthroughs)",
+    "slow: needs real data or minutes of compute",
+]
 
 [tool.ruff.format]
 exclude = ["plans/**", "docs/**"]

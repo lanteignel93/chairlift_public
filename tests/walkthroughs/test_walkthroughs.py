@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-WALKTHROUGHS = sorted((Path(__file__).parents[1] / "debug_walkthroughs").glob("wt_*.py"))
+WALKTHROUGHS = sorted((Path(__file__).parents[2] / "debug_walkthroughs").glob("wt_*.py"))
 
 
 @pytest.mark.parametrize("path", WALKTHROUGHS, ids=lambda p: p.stem)

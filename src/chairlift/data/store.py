@@ -40,8 +40,7 @@ class ArtifactStore:
     """objects/<first two hex>/<sha256>.<kind>, written atomically, never overwritten."""
 
     def __init__(self, root: Path | str) -> None:
-        self.root = Path(root)
-        (self.root / "objects").mkdir(parents=True, exist_ok=True)
+        self.root = Path(root)  # directories are created on the first write, never by construction
 
     def _path(self, digest: str, kind: str) -> Path:
         return self.root / "objects" / digest[:2] / f"{digest}.{kind}"

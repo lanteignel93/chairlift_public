@@ -15,6 +15,9 @@ clients: slalom (cross-sectional, the golden reference) and VXX (time series, th
   under a new name or version.
 - **Stages are pure functions of their spec and inputs.** A stage with no inputs must supply a `fingerprint` or it runs
   every time. Nothing is skipped because a file "looks done".
+- **Tests mirror the package:** `tests/<pkg>/test_<module>.py` for every `src/chairlift/<pkg>/<module>.py` (enforced by
+  `tests/test_layout.py`); add the file to `WITHIN` in `tests/conftest.py` so it runs in dependency order.
+- **Paths come from the site config** (`chairlift config show --explain`); never hard-code a machine path.
 - **Every increment lands with its test.** Important logic units get a `debug_walkthroughs/wt_<topic>.py` (seeded,
   tiny, asserted, `--pdb`), and `tests/test_walkthroughs.py` runs every walkthrough.
 - **In-fold or it is not a number:** transforms, selection, search and stacking fit on training rows only.

@@ -1,8 +1,12 @@
-"""`chairlift` command line: run, plan, inspect and read the log of a study's pipeline.
+"""`chairlift` command line: run, plan, inspect, identify and configure a study's pipeline.
 
 A study is referenced as `module:factory` or `path/to/file.py:factory`, where the factory builds the study's pipeline
 for a run root: `factory(root, **params) -> Pipeline`. `--set name=value` passes keyword parameters to the factory;
 values are parsed as JSON when they can be (5 → int, 0.1 → float, true → bool) and kept as strings otherwise.
+
+Where things go comes from the site configuration (`chairlift config show --explain`): a study named N runs under
+`<paths.home>/studies/N/` and shares `<paths.home>/store/` with every other study on the machine. The name is the
+study module's `STUDY_NAME`, or `--name`. `--root DIR` instead makes one self-contained directory (its own store).
 """
 
 from __future__ import annotations
@@ -10,7 +14,9 @@ from __future__ import annotations
 import importlib
 import importlib.util
 import json
+import re
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -19,11 +25,28 @@ import polars as pl
 from rich.console import Console
 from rich.table import Table
 
+from chairlift.core.config import STARTER, ConfigError, Resolved, load_config
 from chairlift.data.manifest import Manifest
 from chairlift.run.dag import Pipeline
 
+# ---- helpers -----------------------------------------------------------------------------------------------------
 
-def _load_factory(ref: str) -> Any:
+
+@dataclass
+class Ctx:
+    profile: str | None
+    _resolved: Resolved | None = None
+
+    def config(self) -> Resolved:
+        if self._resolved is None:
+            try:
+                self._resolved = load_config(profile=self.profile)
+            except ConfigError as exc:
+                raise click.UsageError(f"configuration: {exc}") from exc
+        return self._resolved
+
+
+def _load_factory(ref: str) -> tuple[Any, Any]:
     target, sep, attr = ref.rpartition(":")
     if not sep or not target or not attr:
         raise click.BadParameter(f"expected module:factory or file.py:factory, got {ref!r}", param_hint="STUDY")
@@ -42,7 +65,7 @@ def _load_factory(ref: str) -> Any:
         except ModuleNotFoundError as exc:
             raise click.BadParameter(f"cannot import {target!r}: {exc}", param_hint="STUDY") from exc
     try:
-        return getattr(module, attr)
+        return module, getattr(module, attr)
     except AttributeError as exc:
         raise click.BadParameter(f"{target!r} has no attribute {attr!r}", param_hint="STUDY") from exc
 
@@ -60,22 +83,51 @@ def _parse_sets(pairs: tuple[str, ...]) -> dict[str, Any]:
     return out
 
 
-def _build(study: str, root: Path, sets: tuple[str, ...]) -> Pipeline:
-    factory = _load_factory(study)
+_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+
+
+def _study_name(ref: str, module: Any, explicit: str | None) -> str:
+    name = explicit or getattr(module, "STUDY_NAME", None)
+    if name is None:
+        target, _, attr = ref.rpartition(":")
+        base = Path(target).stem if target.endswith(".py") else target.rsplit(".", 1)[-1]
+        name = base if attr == "pipeline" else f"{base}-{attr}"
+    if not isinstance(name, str) or not _NAME.match(name):
+        raise click.BadParameter(f"study name {name!r}: letters, digits, '.', '_', '-' only", param_hint="--name")
+    return name
+
+
+@dataclass
+class Built:
+    pipe: Pipeline
+    name: str
+    root: Path
+    shared_store: bool
+
+
+def _build(ctx: Ctx, study: str, root: Path | None, sets: tuple[str, ...], name: str | None) -> Built:
+    module, factory = _load_factory(study)
+    sname = _study_name(study, module, name)
+    store: Path | None = None
+    if root is None:
+        paths = ctx.config().config.paths
+        root, store = paths.study_dir(sname), paths.store_dir()
     try:
         pipe = factory(root, **_parse_sets(sets))
     except TypeError as exc:
         raise click.UsageError(f"the factory rejected the parameters: {exc}") from exc
     if not isinstance(pipe, Pipeline):
         raise click.UsageError(f"{study} returned {type(pipe).__qualname__}, not a Pipeline")
-    return pipe
+    if store is not None:
+        pipe = pipe.rebase(root, store)
+    return Built(pipe, sname, root, store is not None)
 
 
 _RICH = {"hit": "dim", "ran": "green", "run": "yellow", "upstream": "cyan"}
 
 
 def _console() -> Console:
-    # sys.stdout read at call time, so CliRunner captures it; rich colours only when it is a terminal
+    # sys.stdout read at call time, so CliRunner captures it; rich colours only when it is a terminal;
     # piped or captured output gets a wide fixed width so columns are never truncated mid-value
     width = None if sys.stdout.isatty() else 240
     return Console(file=sys.stdout, highlight=False, soft_wrap=False, width=width)
@@ -84,36 +136,62 @@ def _console() -> Console:
 def _table(*columns: str) -> Table:
     t = Table(box=None, pad_edge=False, header_style="bold")
     for c in columns:
-        t.add_column(c, no_wrap=c != "reason", overflow="fold")
+        t.add_column(c, no_wrap=c not in ("reason", "value"), overflow="fold")
     return t
 
 
 study_arg = click.argument("study")
 root_opt = click.option(
-    "--root", type=click.Path(path_type=Path), default=Path("runs/default"), show_default=True, help="Run root."
+    "--root",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="A self-contained run directory (own store). Default: <paths.home>/studies/<name>, shared store.",
 )
+name_opt = click.option("--name", default=None, help="Study name (default: the module's STUDY_NAME).")
 set_opt = click.option("--set", "sets", multiple=True, metavar="NAME=VALUE", help="Factory parameter (repeatable).")
 target_opt = click.option("--target", "targets", multiple=True, help="Run only these stages and their ancestors.")
 json_opt = click.option("--json", "as_json", is_flag=True, help="Machine-readable output.")
 
 
+# ---- commands ----------------------------------------------------------------------------------------------------
+
+
 @click.group()
 @click.version_option(package_name="chairlift")
-def main() -> None:
+@click.option(
+    "--profile", default=None, help="Site configuration profile (overrides CHAIRLIFT_PROFILE and the host map)."
+)
+@click.pass_context
+def main(ctx: click.Context, profile: str | None) -> None:
     """chairlift: a research pipeline in which the protocol is code."""
+    ctx.obj = Ctx(profile)
 
 
 @main.command()
 @study_arg
 @root_opt
+@name_opt
 @set_opt
 @target_opt
 @click.option("--reason", default="", help="Why this build; recorded on every stage that runs.")
 @json_opt
-def run(study: str, root: Path, sets: tuple[str, ...], targets: tuple[str, ...], reason: str, as_json: bool) -> None:
+@click.pass_obj
+def run(
+    ctx: Ctx,
+    study: str,
+    root: Path | None,
+    name: str | None,
+    sets: tuple[str, ...],
+    targets: tuple[str, ...],
+    reason: str,
+    as_json: bool,
+) -> None:
     """Run a study's pipeline; reuse every stage whose inputs, spec and version are unchanged."""
-    pipe = _build(study, root, sets)
-    report = pipe.run(list(targets) or None, reason=reason, meta={"study": study, "params": _parse_sets(sets)})
+    b = _build(ctx, study, root, sets, name)
+    meta: dict[str, Any] = {"study": study, "name": b.name, "params": _parse_sets(sets)}
+    if b.shared_store:
+        meta["config"] = ctx.config().record()
+    report = b.pipe.run(list(targets) or None, reason=reason, meta=meta)
     if as_json:
         click.echo(json.dumps([r.__dict__ for r in report.results.values()], indent=1))
         return
@@ -124,18 +202,28 @@ def run(study: str, root: Path, sets: tuple[str, ...], targets: tuple[str, ...],
     con = _console()
     con.print(t)
     ran = report.ran()
-    con.print(f"\n{len(ran)} ran, {len(report.results) - len(ran)} reused · run {report.run_id} · root {root}")
+    con.print(f"\n{len(ran)} ran, {len(report.results) - len(ran)} reused · {b.name} · run {report.run_id} · {b.root}")
 
 
 @main.command()
 @study_arg
 @root_opt
+@name_opt
 @set_opt
 @target_opt
 @json_opt
-def plan(study: str, root: Path, sets: tuple[str, ...], targets: tuple[str, ...], as_json: bool) -> None:
+@click.pass_obj
+def plan(
+    ctx: Ctx,
+    study: str,
+    root: Path | None,
+    name: str | None,
+    sets: tuple[str, ...],
+    targets: tuple[str, ...],
+    as_json: bool,
+) -> None:
     """Show what `run` would do, without running anything."""
-    items = _build(study, root, sets).plan(list(targets) or None)
+    items = _build(ctx, study, root, sets, name).pipe.plan(list(targets) or None)
     if as_json:
         click.echo(json.dumps([i.__dict__ for i in items], indent=1))
         return
@@ -149,11 +237,15 @@ def plan(study: str, root: Path, sets: tuple[str, ...], targets: tuple[str, ...]
 @study_arg
 @click.argument("stage")
 @root_opt
+@name_opt
 @set_opt
 @click.option("--rows", default=10, show_default=True, help="Rows to print for a frame.")
-def show(study: str, stage: str, root: Path, sets: tuple[str, ...], rows: int) -> None:
+@click.pass_obj
+def show(
+    ctx: Ctx, study: str, stage: str, root: Path | None, name: str | None, sets: tuple[str, ...], rows: int
+) -> None:
     """Print a stage's stored output (building it and its ancestors first if needed)."""
-    pipe = _build(study, root, sets)
+    pipe = _build(ctx, study, root, sets, name).pipe
     if stage not in pipe.stages:
         raise click.BadParameter(f"unknown stage {stage!r}; stages: {', '.join(pipe.order)}", param_hint="STAGE")
     report = pipe.run([stage])
@@ -167,13 +259,44 @@ def show(study: str, stage: str, root: Path, sets: tuple[str, ...], rows: int) -
 
 
 @main.command()
+@study_arg
+@root_opt
+@name_opt
+@set_opt
+@target_opt
+@json_opt
+@click.pass_obj
+def signature(
+    ctx: Ctx,
+    study: str,
+    root: Path | None,
+    name: str | None,
+    sets: tuple[str, ...],
+    targets: tuple[str, ...],
+    as_json: bool,
+) -> None:
+    """Print the run signature (inputs-only identity) and each stage's plan key, without running."""
+    sig = _build(ctx, study, root, sets, name).pipe.signature(list(targets) or None)
+    if as_json:
+        click.echo(json.dumps({"signature": sig.signature, "plan_keys": sig.plan_keys}, indent=1))
+        return
+    t = _table("stage", "plan key")
+    for stage_name, k in sig.plan_keys.items():
+        t.add_row(stage_name, k[:16])
+    con = _console()
+    con.print(t)
+    con.print(f"\nsignature {sig.signature}")
+
+
+@main.command()
 @root_opt
 @click.option("--stage", help="Only this stage's records.")
 @click.option("--last", default=20, show_default=True, help="Most recent records to show.")
 @json_opt
-def log(root: Path, stage: str | None, last: int, as_json: bool) -> None:
-    """Read the manifest: what was built, when, from which inputs and code, and why."""
-    path = root / "manifest.jsonl"
+@click.pass_obj
+def log(ctx: Ctx, root: Path | None, stage: str | None, last: int, as_json: bool) -> None:
+    """Read the manifest: what was built, when, from which inputs and code, and why (default: the shared store's)."""
+    path = (root if root is not None else ctx.config().config.paths.store_dir()) / "manifest.jsonl"
     if not path.exists():
         raise click.UsageError(f"no manifest at {path}")
     lines = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
@@ -191,49 +314,38 @@ def log(root: Path, stage: str | None, last: int, as_json: bool) -> None:
     con.print(f"\n{len(Manifest(path).records())} keys in the manifest")
 
 
-@main.command()
-@study_arg
-@root_opt
-@set_opt
-@target_opt
-@json_opt
-def signature(study: str, root: Path, sets: tuple[str, ...], targets: tuple[str, ...], as_json: bool) -> None:
-    """Print the run signature (inputs-only identity) and each stage's plan key, without running."""
-    sig = _build(study, root, sets).signature(list(targets) or None)
-    if as_json:
-        click.echo(json.dumps({"signature": sig.signature, "plan_keys": sig.plan_keys}, indent=1))
-        return
-    t = _table("stage", "plan key")
-    for name, k in sig.plan_keys.items():
-        t.add_row(name, k[:16])
-    con = _console()
-    con.print(t)
-    con.print(f"\nsignature {sig.signature}")
-
-
-def _records(root: Path) -> list[dict[str, Any]]:
-    runs = root / "runs"
-    if not runs.exists():
-        raise click.UsageError(f"no runs recorded under {runs}")
-    return [json.loads(p.read_text()) for p in sorted(runs.glob("*.json"))]
+def _records(ctx: Ctx, root: Path | None, study: str | None) -> list[dict[str, Any]]:
+    if root is not None:
+        files = sorted((root / "runs").glob("*.json"))
+        where = root / "runs"
+    else:
+        studies = ctx.config().config.paths.studies_dir()
+        files = sorted(studies.glob(f"{study or '*'}/runs/*.json"))
+        where = studies
+    if not files:
+        raise click.UsageError(f"no runs recorded under {where}")
+    recs = [json.loads(p.read_text()) for p in files]
+    return sorted(recs, key=lambda r: r["run_id"])
 
 
 @main.group(invoke_without_command=True)
 @root_opt
+@click.option("--study", "study_name", default=None, help="Only this study's runs.")
 @click.pass_context
-def runs(ctx: click.Context, root: Path) -> None:
-    """List recorded runs (newest last); `runs show RUN` prints one record."""
-    ctx.obj = root
+def runs(ctx: click.Context, root: Path | None, study_name: str | None) -> None:
+    """List recorded runs across studies (newest last); `runs show RUN` prints one record."""
+    c: Ctx = ctx.obj
+    ctx.meta["runs_root"], ctx.meta["runs_study"] = root, study_name
     if ctx.invoked_subcommand is not None:
         return
-    t = _table("run_id", "status", "signature", "study", "params", "reason")
-    for r in _records(root):
+    t = _table("run_id", "study", "status", "signature", "params", "reason")
+    for r in _records(c, root, study_name):
         meta = r.get("meta", {})
         t.add_row(
             r["run_id"],
+            str(meta.get("name", meta.get("study", ""))),
             r["status"],
             r["signature"][:12],
-            str(meta.get("study", "")),
             json.dumps(meta.get("params", {})),
             r.get("reason", ""),
         )
@@ -242,10 +354,59 @@ def runs(ctx: click.Context, root: Path) -> None:
 
 @runs.command("show")
 @click.argument("run")
-@click.pass_obj
-def runs_show(root: Path, run: str) -> None:
+@click.pass_context
+def runs_show(ctx: click.Context, run: str) -> None:
     """Print a run record by run id or signature prefix (the newest match)."""
-    matches = [r for r in _records(root) if r["run_id"].startswith(run) or r["signature"].startswith(run)]
+    recs = _records(ctx.obj, ctx.meta["runs_root"], ctx.meta["runs_study"])
+    matches = [r for r in recs if r["run_id"].startswith(run) or r["signature"].startswith(run)]
     if not matches:
         raise click.BadParameter(f"no run or signature starting with {run!r}", param_hint="RUN")
     click.echo(json.dumps(matches[-1], indent=1, sort_keys=True))
+
+
+@main.group()
+def config() -> None:
+    """Site configuration: show, check, or start a file."""
+
+
+@config.command("show")
+@click.option("--explain", is_flag=True, help="Show which layer set each value.")
+@json_opt
+@click.pass_obj
+def config_show(ctx: Ctx, explain: bool, as_json: bool) -> None:
+    """Print the resolved site configuration for this machine."""
+    r = ctx.config()
+    if as_json:
+        click.echo(json.dumps(r.record(), indent=1))
+        return
+    t = _table("key", "value", "layer") if explain else _table("key", "value")
+    for key, value, layer in r.explain():
+        t.add_row(key, str(value), layer) if explain else t.add_row(key, str(value))
+    con = _console()
+    con.print(t)
+    p = r.config.paths
+    con.print(f"\nprofile {r.profile or '-'} · store {p.store_dir()} · studies {p.studies_dir()}")
+    con.print("files: " + (", ".join(r.files) if r.files else "none (defaults)"))
+
+
+@config.command("check")
+@click.pass_obj
+def config_check(ctx: Ctx) -> None:
+    """Validate every layer; exit non-zero on the first problem."""
+    r = ctx.config()
+    click.echo(f"ok · {len(r.files)} file(s) · profile {r.profile or '-'}")
+
+
+@config.command("init")
+@click.option("--project", is_flag=True, help="Write ./chairlift.toml instead of the user file.")
+@click.option("--force", is_flag=True, help="Overwrite an existing file.")
+def config_init(project: bool, force: bool) -> None:
+    """Write a commented starter configuration file."""
+    import platformdirs
+
+    path = Path("chairlift.toml") if project else platformdirs.user_config_path("chairlift") / "config.toml"
+    if path.exists() and not force:
+        raise click.UsageError(f"{path} exists; use --force to overwrite")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(STARTER)
+    click.echo(f"wrote {path}")

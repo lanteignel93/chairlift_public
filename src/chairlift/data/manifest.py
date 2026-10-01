@@ -29,7 +29,6 @@ class Record:
 class Manifest:
     def __init__(self, path: Path | str) -> None:
         self.path = Path(path)
-        self.path.parent.mkdir(parents=True, exist_ok=True)
         self._by_key: dict[str, Record] = {}
         if self.path.exists():
             for line in self.path.read_text().splitlines():
@@ -63,6 +62,7 @@ class Manifest:
             reason=reason,
             built_at=dt.datetime.now(dt.UTC).isoformat(timespec="seconds"),
         )
+        self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.path.open("a") as fh:
             fh.write(json.dumps(asdict(rec), sort_keys=True) + "\n")
         self._by_key[key] = rec

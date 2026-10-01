@@ -90,3 +90,29 @@ repositories).
   256-core box made the suite slower (31 s vs 1 s).
 - **Deferred:** PEP 723 inline metadata for walkthroughs (they import the local package, which inline metadata cannot
   express without a path source); dataframely frame contracts arrive with the first protocol that returns a frame.
+
+## 2026-09-30 — Site configuration: one home per machine, layered TOML with provenance
+
+Implemented `core/config.py` (plans/m0-config.md steps 1–3). Laurent: all data in one directory, studies named from
+config, so strategies can share work. Layout: `<paths.home>/store/` (the content store and its manifest, shared by
+every study on the machine: identical stages are reused across studies), `<paths.home>/studies/<name>/` (run
+records, later events and reports), `<paths.home>/reports/`, `<paths.home>/cache/`; each subpath can be moved
+alone. Layers: defaults (XDG data dir), system, user, the nearest `chairlift.toml`, `CHAIRLIFT_CONFIG`, the profile
+(explicit > `CHAIRLIFT_PROFILE` > host map), `CHAIRLIFT_<SECTION>__<KEY>` env, CLI. Every leaf records the layer
+that set it. Paths expand `~` and `${VAR}`/`$VAR` (undefined is an error) and resolve relative to the file that set
+them. Unknown keys and wrong types fail with the dotted key and the layer. Validation: msgspec `convert` into frozen
+dataclasses. Secrets live in `core/secrets.py`: env `CHAIRLIFT_SECRET_*` or a 0600 `secrets.toml`, masked repr, refuse
+to pickle or serialize, never part of `Config`. The study name is the module's `STUDY_NAME` or `--name`; `--root`
+keeps the old self-contained layout. Store and manifest no longer create directories on construction (a factory's
+throwaway pipeline left empty folders). Rejected: pydantic-settings (second model system, its own CLI parser),
+Hydra/OmegaConf (maintenance-only, YAML, takes over `main`), dynaconf (untyped). Risk: concurrent appends to one shared
+manifest are atomic for single short lines on a local filesystem, not guaranteed on NFS; revisit (per-host manifest
+or a lock) before two machines write one store.
+
+## 2026-09-30 — Tests mirror the package, ordered by tier
+
+`src/chairlift/<pkg>/<module>.py` is tested by `tests/<pkg>/test_<module>.py`; `tests/test_layout.py` fails when a
+module has none. Cross-cutting suites: `tests/properties/` (hypothesis), `tests/golden/` (syrupy), `tests/walkthroughs/`
+(each carries a marker). `tests/conftest.py` orders collection by dependency tier (core → data → … → run → verify →
+properties → golden → walkthroughs → layout) and by dependency within a tier, so the first failure is the lowest
+broken layer. `--import-mode=importlib` and `--strict-markers`.
