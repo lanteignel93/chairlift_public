@@ -81,3 +81,23 @@ def test_paired_difference_cancels_the_common_component():
     r = paired_sharpe_diff(a, b, DailyStatsSpec(n_boot=400, seed=2))
     assert r["d_sharpe"] > 0 and r["d_sharpe_ci"][0] > 0  # unpaired, these CIs would overlap entirely
     assert r["corr"] > 0.99
+
+
+def test_ic_by_year_is_bit_identical_across_calls():
+    rng = np.random.default_rng(0)
+    n = 40000
+    f = pl.DataFrame(
+        {"t0": rng.integers(0, 2000, n), "y_year": 0, "pred": rng.standard_normal(n), "y_rank": rng.random(n)}
+    )
+    f = f.with_columns(y_year=pl.col("t0") // 250)
+    first = ic_by_year(f)
+    assert all(ic_by_year(f) == first for _ in range(5))
+
+
+def test_concentration_flags_a_result_made_by_a_few_days():
+    dates = [dt.date(2018, 1, 1) + dt.timedelta(days=i) for i in range(500)]
+    rng = np.random.default_rng(4)
+    x = 0.01 * rng.standard_normal(500)
+    x[[10, 200, 300]] = 0.5  # three lucky days
+    st = daily_stats(x, dates, DailyStatsSpec(n_boot=100))
+    assert st["top5_share"] > 0.8 and st["sharpe_without_top5"] < st["sharpe"] / 2

@@ -47,7 +47,11 @@ def in_sample_ic(frame: pl.DataFrame, pred: pl.Series, target: str, date: str, c
     if not cross_section:
         return float(frame.select(target).with_columns(p=pred).select(pl.corr("p", target, method="spearman")).item())
     by_day = (
-        frame.select(date, target).with_columns(p=pred).group_by(date).agg(ic=pl.corr("p", target, method="spearman"))
+        frame.select(date, target)
+        .with_columns(p=pred)
+        .group_by(date)
+        .agg(ic=pl.corr("p", target, method="spearman"))
+        .sort(date)  # a deterministic summation order for the mean
     )
     return _num(by_day.fill_nan(None)["ic"].mean())
 

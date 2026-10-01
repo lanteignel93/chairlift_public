@@ -92,6 +92,10 @@ def daily_stats(x: np.ndarray, dates: Sequence[dt.date], s: DailyStatsSpec) -> d
         "by_year_sharpe": by_year,
         "years_pos": sum(v > 0 for v in by_year.values()),
         "n_years": len(by_year),
+        # the red flag "returns dominated by a few observations": the five best periods' share of the total, and the
+        # Sharpe once they are removed
+        "top5_share": float(np.sort(x)[-5:].sum() / cum[-1]) if n > 5 and cum[-1] != 0 else None,
+        "sharpe_without_top5": _sharpe(np.sort(x)[:-5], s.periods) if n > 10 else None,
         "by_halfyear_sharpe": by_half,
         "halfyears_pos": sum(v > 0 for v in by_half.values()),
         "n_halfyears": len(by_half),
@@ -120,7 +124,8 @@ def ic_by_year(
         frame.group_by(date, year)
         .agg(ic=pl.corr(pred, target, method="spearman"))
         .fill_nan(None)
-        .group_by(year)
+        .sort(date)  # group_by returns groups in arbitrary order: sort so every mean sums in date order
+        .group_by(year, maintain_order=True)
         .agg(pl.col("ic").mean())
         .sort(year)
     )

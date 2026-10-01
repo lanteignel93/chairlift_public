@@ -242,7 +242,46 @@ def vxx(store: ArtifactStore, home: Path) -> dict[str, Any]:
         "books": summary,
         "sweep": cells,
         "index_days": idx.height,
+        "regime": _vxx_regime(store, recs),
     }
+
+
+def _vxx_regime(store: ArtifactStore, recs: list[dict[str, Any]]) -> dict[str, Any]:
+    """Always short against the futures-contango rule and LightGBM on a 1-day target (the v4 evaluation)."""
+
+    def latest(h: int) -> dict[str, Any] | None:
+        for r in reversed(recs):
+            ev = r.get("results", {}).get("evaluate")
+            if ev and r["meta"].get("params", {}).get("horizon") == h:
+                out = store.get(ev["output"])
+                if "short_if_roll_yield_gt_0.0%" in out:
+                    return out
+        return None
+
+    e5, e1 = latest(5), latest(1)
+    if e5 is None or e1 is None:
+        return {}
+    lines = {
+        "always short": e5["always_short"],
+        "short if F2 > F1 (futures contango)": e5["short_if_roll_yield_gt_0.0%"],
+        "LightGBM, 1-day target": e1["gbm"],
+    }
+    colors = [VXX["always_short"], "#2e9e6a", "#8b5cd6"]
+    fig, ax = plt.subplots(2, 1, figsize=(11, 5.2), sharex=True, gridspec_kw={"height_ratios": [2, 1]})
+    for (name, st), c in zip(lines.items(), colors, strict=True):
+        d = pl.DataFrame(st["daily"]).with_columns(pl.col("date").str.to_date())
+        cum = np.cumsum(d["pnl"].to_numpy())
+        label = f"{name}: Sharpe {st['sharpe']:.2f}, max DD {st['max_drawdown']:.2f}"
+        ax[0].plot(d["date"], cum, color=c, lw=1.2, label=label)
+        ax[1].plot(d["date"], cum - np.maximum.accumulate(cum), color=c, lw=1.0)
+    ax[0].set_title("VXX: can regime conditioning beat always short? (2017–2023 OOS, 5 bp per unit traded)")
+    ax[0].legend(loc="upper left", fontsize=8)
+    ax[1].set_title("drawdown (cumulative return below its running peak)")
+    fig.tight_layout()
+    fig.savefig(FIG / "vxx_regime.png")
+    plt.close(fig)
+    keep = ("sharpe", "sharpe_ci", "max_drawdown", "vs_always_short")
+    return {name: {k: st[k] for k in keep} for name, st in lines.items()}
 
 
 def main() -> None:

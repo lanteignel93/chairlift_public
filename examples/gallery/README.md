@@ -92,6 +92,32 @@ What VXX forced chairlift to change: a `cross_section=False` switch on the fit (
 ensemble scaled by training-fold moments (within-date z-scores are meaningless with one row; test-period z-scores leak),
 and a time-series IC. Folds, models, books and statistics ran unchanged.
 
+### Can regime conditioning beat always short?
+
+Laurent's challenge: surely "short when contango is steep" beats standing short, and if chairlift cannot find that it
+needs work. It did need work. Three additions, then the answer:
+- a regime-rule learner that searches feature × threshold × side in-fold by the position's own Sharpe
+- pre-specified rules on the futures roll yield
+- a 1-day target
+
+![regime](figures/vxx_regime.png)
+
+| 2017–2023 OOS, 5 bp | Sharpe [CI99] | max DD | ΔSharpe vs always short [CI99] | Sharpe without its 5 best days |
+|---|---|---|---|---|
+| always short | 0.50 [−0.53, 1.68] | −2.07 | | 0.34 |
+| **short if F2 > F1** (futures contango, pre-specified) | **0.71** [−0.39, 1.79] | **−1.13** | +0.21 [−0.59, 1.08] | **0.57** |
+| LightGBM, 1-day target | 0.80 [−0.30, 1.89] | −1.41 | +0.30 [−1.00, 1.50] | 0.50 |
+| regime-rule learner, searched in-fold | 0.15 [−0.68, 1.42] | −1.58 | −0.35 [−1.15, 0.73] | |
+
+- **The intuition holds on the point estimates.** The plain futures-contango rule lifts Sharpe and halves the
+  drawdown. It keeps its edge when its best days are removed: the edge is losses avoided across many days.
+- **The 1-day model is one lucky trade.** It was long into 2018-02-02, and 47% of its P&L is five days.
+- **Nothing is established yet.** Every paired difference spans zero. The best of the 27 books examined has a
+  deflated Sharpe probability of 0.73 against the expected maximum of 27 null trials (0.56).
+- **The in-fold learner found the rule only from 2019**, once its training history contained a spike. Before that
+  it had no way to know.
+- **What decides it:** the sealed 2024+ holdout, one look, for a registered candidate.
+
 ### One command, six experiments
 
 ```bash

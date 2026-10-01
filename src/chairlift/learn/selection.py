@@ -84,7 +84,8 @@ def score(R: pl.DataFrame, feature: str, target: str = "y_rank", date: str = "t0
         .agg(ic=pl.corr(feature, target, method="spearman"))
         .fill_nan(None)
         .drop_nulls("ic")
-        .group_by(year)
+        .sort(date)  # group_by returns groups in arbitrary order: sort so every mean sums in date order
+        .group_by(year, maintain_order=True)
         .agg(pl.col("ic").mean())
         .sort(year)["ic"]
         .to_numpy()
