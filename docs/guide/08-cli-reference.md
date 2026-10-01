@@ -260,6 +260,7 @@ The latest run's state. Exit 0 ok, 1 failed or died, 2 still running: for script
 |---|---|
 | `--root PATH` | A self-contained run directory (own store). Default: &lt;paths.home&gt;/studies/&lt;name&gt;, shared store. |
 | `--study TEXT` | Study name (default: the most recent run of any study). |
+| `--run TEXT` | A run id prefix (default: the newest run). |
 | `--json` | Machine-readable output. |
 
 <a id="chairlift-sweep"></a>
@@ -296,5 +297,6 @@ Follow a run from its event file: the same live view as `run`, from any terminal
 |---|---|
 | `--root PATH` | A self-contained run directory (own store). Default: &lt;paths.home&gt;/studies/&lt;name&gt;, shared store. |
 | `--study TEXT` | Study name (default: the most recent run of any study). |
+| `--run TEXT` | A run id prefix (default: the newest run). |
 | `--interval FLOAT` | Seconds between reads of the event file.  [default: 0.25] |
 | `--once` | Print the current state and exit, even if the run is still going. |

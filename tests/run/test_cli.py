@@ -268,3 +268,15 @@ def test_user_text_in_tables_is_not_eaten_as_rich_markup(tmp_path):
     invoke("run", TOY, "--root", root, "--target", "sources", "--reason", "retry [bold] after [fold=1] fix")
     assert "retry [bold] after [fold=1] fix" in invoke("runs", "--root", root).output
     assert "retry [bold] after [fold=1] fix" in invoke("log", "--root", root).output
+
+
+def test_watch_and_status_follow_a_named_run_not_only_the_newest(tmp_path):
+    root = tmp_path / "toy"
+    invoke("run", TOY, "--root", str(root), "--target", "sources")
+    first = _records(root)[-1]["run_id"]
+    invoke("run", TOY, "--root", str(root), "--target", "folds", "--set", "window=2")
+    out = CliRunner().invoke(main, ["status", "--root", str(root), "--run", first[:22], "--json"])
+    assert out.exit_code == 0 and json.loads(out.output)["run_id"] == first
+    shown = invoke("watch", "--root", str(root), "--run", first[:22], "--once").output
+    assert "sources" in shown and "folds" not in shown
+    assert CliRunner().invoke(main, ["status", "--root", str(root), "--run", "1999"]).exit_code == 2

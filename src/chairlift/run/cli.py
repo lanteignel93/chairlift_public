@@ -713,8 +713,17 @@ def config_init(project: bool, force: bool) -> None:
     click.echo(f"wrote {path}")
 
 
-def _latest(ctx: Ctx, root: Path | None, study_name: str | None) -> tuple[Path, dict[str, Any]]:
-    """The newest run record (and its path) for a study, or for a self-contained root."""
+def _latest(ctx: Ctx, root: Path | None, study_name: str | None, run: str | None = None) -> tuple[Path, dict[str, Any]]:
+    """The newest run record (and its path) for a study, or for a self-contained root; with `run`, the newest record
+    whose run id starts with it (any study)."""
+    if run is not None:
+        base = root / "runs" if root is not None else ctx.config().config.paths.studies_dir()
+        pattern = f"{run}*.json" if root is not None else f"{study_name or '*'}/runs/{run}*.json"
+        found = [p for p in base.glob(pattern) if not p.name.endswith(".events.jsonl")]
+        if not found:
+            raise click.UsageError(f"no run starting with {run!r} under {base}")
+        newest = max(found, key=lambda p: p.stem)
+        return newest, json.loads(newest.read_text())
     if root is not None:
         runs_dir = root / "runs"
     elif study_name is not None:
@@ -748,12 +757,13 @@ def _alive(rec: dict[str, Any]) -> bool | None:
 @main.command()
 @root_opt
 @click.option("--study", "study_name", default=None, help="Study name (default: the most recent run of any study).")
+@click.option("--run", "run_id", default=None, help="A run id prefix (default: the newest run).")
 @click.option("--interval", default=0.25, show_default=True, help="Seconds between reads of the event file.")
 @click.option("--once", is_flag=True, help="Print the current state and exit, even if the run is still going.")
 @click.pass_obj
-def watch(ctx: Ctx, root: Path | None, study_name: str | None, interval: float, once: bool) -> None:
+def watch(ctx: Ctx, root: Path | None, study_name: str | None, run_id: str | None, interval: float, once: bool) -> None:
     """Follow a run from its event file: the same live view as `run`, from any terminal."""
-    rec_path, rec = _latest(ctx, root, study_name)
+    rec_path, rec = _latest(ctx, root, study_name, run_id)
     events_path = rec_path.parent / f"{rec['run_id']}.events.jsonl"
     evs, offset = read_events(events_path)
     state = replay(evs)
@@ -774,11 +784,12 @@ def watch(ctx: Ctx, root: Path | None, study_name: str | None, interval: float, 
 @main.command()
 @root_opt
 @click.option("--study", "study_name", default=None, help="Study name (default: the most recent run of any study).")
+@click.option("--run", "run_id", default=None, help="A run id prefix (default: the newest run).")
 @json_opt
 @click.pass_obj
-def status(ctx: Ctx, root: Path | None, study_name: str | None, as_json: bool) -> None:
+def status(ctx: Ctx, root: Path | None, study_name: str | None, run_id: str | None, as_json: bool) -> None:
     """The latest run's state. Exit 0 ok, 1 failed or died, 2 still running: for scripts and timers."""
-    _, rec = _latest(ctx, root, study_name)
+    _, rec = _latest(ctx, root, study_name, run_id)
     state = rec["status"]
     if state == "running" and _alive(rec) is False:
         state = "died"
