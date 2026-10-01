@@ -33,6 +33,7 @@ import click
 import polars as pl
 from rich.console import Console
 from rich.live import Live
+from rich.markup import escape
 from rich.table import Table
 
 from chairlift.core.config import STARTER, ConfigError, Resolved, load_config
@@ -461,7 +462,7 @@ def log(ctx: Ctx, root: Path | None, stage: str | None, last: int, as_json: bool
             str(r["version"]),
             r["output"][:20] + "…",
             r["code"],
-            r["reason"],
+            escape(r["reason"]),
         )
     con = _console()
     con.print(t)
@@ -500,8 +501,8 @@ def runs(ctx: click.Context, root: Path | None, study_name: str | None) -> None:
             str(meta.get("name", meta.get("study", ""))),
             r["status"],
             r["signature"][:12],
-            json.dumps(meta.get("params", {})),
-            r.get("reason", ""),
+            escape(json.dumps(meta.get("params", {}))),
+            escape(r.get("reason", "")),
         )
     _console().print(t)
 
@@ -588,6 +589,10 @@ def rerun(
         sys.exit(1)
 
 
+def _cell(v: Any) -> str:
+    return f"{v:.6g}" if isinstance(v, float) else str(v)
+
+
 def _last_metrics(rec_path: Path) -> dict[str, float]:
     evs, _ = read_events(rec_path.parent / rec_path.name.replace(".json", ".events.jsonl"))  # run ids contain dots
     out: dict[str, float] = {}
@@ -647,14 +652,13 @@ def compare(ctx: Ctx, run_a: str, run_b: str, root: Path | None, show_all: bool,
         out = [{"section": s, "key": k, "a": va, "b": vb, "same": va == vb} for s, k, va, vb in rows]
         click.echo(json.dumps({"a": a["run_id"], "b": b["run_id"], "rows": out}, indent=1, default=str))
         return
+    order = ["run", "params", "spec", "data", "output", "env", "metric"]
     t = _table("", "key", a["run_id"], b["run_id"])
-    shown = 0
-    for s, k, va, vb in rows:
+    for s, k, va, vb in sorted(rows, key=lambda r: order.index(r[0])):  # stable: stage order kept within a section
         if va == vb and not show_all and s != "run":
             continue
         style = "dim" if va == vb else "yellow"
-        t.add_row(s, k, f"[{style}]{va}[/]", f"[{style}]{vb}[/]")
-        shown += 1
+        t.add_row(s, escape(k), f"[{style}]{escape(_cell(va))}[/]", f"[{style}]{escape(_cell(vb))}[/]")
     con = _console()
     con.print(t)
     differ = sum(1 for _, _, va, vb in rows if va != vb)

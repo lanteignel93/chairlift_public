@@ -1,6 +1,6 @@
 # M0 Config: machine-independent settings, experiment files, and run identity
 
-**Status:** in-flight (steps 1–3 landed 2026-09-30: 4119ab0)
+**Status:** complete (steps 1–3 landed 2026-09-30: 4119ab0; 4–7 on 2026-10-01)
 **Prepared:** 2026-09-30
 **Owner:** Laurent Lanteigne
 **Buy-in:** Laurent — asked for centralized configs, no machine-specific paths, hashed inputs per run (2026-09-30)
@@ -234,3 +234,23 @@ automated-search plan, as a `[search]` section of the same experiment file).
 sharing work), instead of four independent roots. Each subpath can still be moved alone. `config show / check / init`
 (step 7's commands) landed early because they were needed to debug the layering. Remaining: data references and
 fingerprints (4), experiment files and `sweep` (5), environment hash, `rerun`, `compare` (6), `wt_config.py` (7).
+
+*Complete, 2026-10-01.* Steps 4–7 landed as planned, with these as-built details (full entry in
+`docs/decisions.md`, 2026-10-01):
+- `DataRef(alias=, relpath=)` is keyword-only like every spec.
+- The stat cache is per-host JSON lines, not sqlite.
+- The environment hash covers the installed distributions; the `uv.lock` hash is recorded, not hashed.
+- Two fixes found on the way: a per-host manifest file, which closes the NFS open question (sharing over NFS now
+  works by configuration), and a manifest that re-reads on a miss.
+- Experiment files may live anywhere; the study reference is enough (open question 2: allowed).
+
+Verification criteria:
+- toy on a fresh machine with no config: `tests/run/test_wiring.py`, `docs/guide/03`
+- two machines, one signature, data at different paths: `tests/data/test_refs.py`, `debug_walkthroughs/wt_config.py`
+- no machine-specific path in `src/`: grep is clean
+- `--explain` names every layer: `tests/core/test_config.py`
+- no secret in records or hashes: `tests/run/test_wiring.py`
+- `rerun` reproduces a toy run bit for bit: `tests/run/test_cli.py`
+
+The trial-ledger charge for sweep cells moves to milestone 1 with the ledger. The user guide (`docs/guide/`) ships
+with this plan.

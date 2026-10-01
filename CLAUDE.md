@@ -17,7 +17,8 @@ clients: slalom (cross-sectional, the golden reference) and VXX (time series, th
   every time. Nothing is skipped because a file "looks done".
 - **Tests mirror the package:** `tests/<pkg>/test_<module>.py` for every `src/chairlift/<pkg>/<module>.py` (enforced by
   `tests/test_layout.py`); add the file to `WITHIN` in `tests/conftest.py` so it runs in dependency order.
-- **Paths come from the site config** (`chairlift config show --explain`); never hard-code a machine path.
+- **Paths come from the site config** (`chairlift config show --explain`); never hard-code a machine path. Studies read
+  data through `DataRef(alias=..., relpath=...)` and fingerprint it with `fingerprint_of`; never a path in a study.
 - **Every increment lands with its test.** Important logic units get a `debug_walkthroughs/wt_<topic>.py` (seeded,
   tiny, asserted, `--pdb`), and `tests/test_walkthroughs.py` runs every walkthrough.
 - **In-fold or it is not a number:** transforms, selection, search and stacking fit on training rows only.
@@ -40,7 +41,16 @@ uv run chairlift run  chairlift.verify.toy:pipeline --set pace=0.4   # animated 
 uv run chairlift watch --study toy                                   # follow the latest run from its event file
 uv run chairlift status --study toy                                  # exit 0 ok · 1 failed/died · 2 running
 uv run chairlift config show --explain
+uv run chairlift run   examples/experiments/toy-window.toml             # an experiment file (study, params, targets)
+uv run chairlift sweep examples/experiments/toy-sweep.toml --dry-run    # cells and signatures; drop --dry-run to run
+uv run chairlift rerun RUN                                              # rebuild from the record in a fresh dir; byte-compare
+uv run chairlift compare RUN_A RUN_B                                    # params, specs, data, outputs, env, metrics
+uv run python scripts/gen_cli_reference.py                              # after any CLI change (tests/docs checks it)
 ```
+
+User guide: `docs/guide/` (repo-first; describes shipped behaviour only, with real command output). When a command's
+behaviour or output changes, update the page that shows it; `tests/docs/` checks the CLI reference, the links, and
+that the guide quotes `examples/momentum_study.py` verbatim.
 
 Set `UV_LINK_MODE=copy` on this box (the uv cache is on another filesystem).
 

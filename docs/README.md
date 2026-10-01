@@ -5,6 +5,7 @@ feature families and portfolio rules; chairlift supplies point-in-time data acce
 their own embargo, fold-local fitting, evaluation with block-bootstrap intervals and multiple-testing accounting, a
 holdout the loader refuses to read, and a manifest that makes every rebuild reproducible and explainable.
 
+- **User guide: [guide/](guide/README.md)**: setup → running → monitoring → reproducing → writing a study
 - Decisions: [decisions.md](decisions.md)
 - How to read the outputs: [how-to-read.md](how-to-read.md)
 - Plans: [../plans/](../plans/)
@@ -24,7 +25,15 @@ versatility on several different strategies once the setup is settled, and impro
 
 ## Status
 
-Milestone 0 in progress. Landed: spec identity, code identity, the content store and manifest, the DAG runner with
-plan keys and run signatures, run records, layered site configuration with provenance and secrets, the event stream
-and the animated live view, and the CLI (`run`, `plan`, `show`, `log`, `signature`, `runs`, `watch`, `status`,
-`config`). 129 tests mirroring `src/`, two walkthroughs.
+Milestone 0 in progress. Landed:
+- spec identity, code identity, the content store, and the manifest (one file per host in a shared store)
+- the DAG runner with plan keys and run signatures, and run records with an environment hash
+- layered site configuration with provenance, and secrets
+- data references with blake3 content fingerprints and a stat cache
+- experiment files with typed parameters, and sweeps
+- `rerun` and `compare`
+- the event stream and the animated live view
+- the CLI: `run`, `plan`, `show`, `signature`, `sweep`, `log`, `runs`, `rerun`, `compare`, `watch`, `status`,
+  `config`
+
+204 tests mirroring `src/`, three walkthroughs, and a user guide whose CLI reference is generated and checked.

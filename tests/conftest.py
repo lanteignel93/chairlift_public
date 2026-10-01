@@ -6,10 +6,11 @@ Layout rule (enforced by tests/test_layout.py): `src/chairlift/<package>/<module
     tests/properties/    @property    hypothesis invariants across modules
     tests/golden/        @golden      content snapshots of whole pipelines (syrupy)
     tests/walkthroughs/  @walkthrough every debug walkthrough, asserted
+    tests/docs/          the user guide: generated CLI reference current, links resolve, the example study runs
 
 Collection order follows the dependency tiers, so the first failure is the lowest broken layer:
 core → data → target → features → schedule → learn → book → evaluate → diagnose → ledger → report → run → verify →
-properties → golden → walkthroughs → layout.
+properties → golden → walkthroughs → docs → layout.
 """
 
 from __future__ import annotations
@@ -36,6 +37,7 @@ TIERS = [
     "properties",
     "golden",
     "walkthroughs",
+    "docs",
 ]
 # within a tier, modules run in their dependency order; unlisted files follow, alphabetically
 WITHIN = {

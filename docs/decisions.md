@@ -132,3 +132,43 @@ status` exits 0 ok, 1 failed or died (a run left `running` whose process is gone
 Found while building it: run ids were second-resolution, so two runs of one experiment in the same second shared an
 id and appended to one event file. Run ids are now `<UTC time to the microsecond>Z-<signature[:12]>` with a collision
 suffix; regression test added.
+
+## 2026-10-01 — Config completion: per-host manifests, data references, experiments, rerun / compare (m0-config 4–7)
+
+- **Per-host manifest.** A shared store writes `manifest.<host>.jsonl` and reads every `manifest*.jsonl`, so each
+  file has one writer and two machines on NFS never interleave appends. `built_at` has microseconds and records carry
+  `host`; when one key appears in two files, the later build wins. A `--root` directory keeps one `manifest.jsonl`.
+  This closes the NFS risk noted on 2026-09-30.
+- **The manifest re-reads on a miss.** Found building `sweep`: every cell's pipeline is built (and validated) before
+  any runs, and each opened its manifest as a snapshot, so later cells never saw earlier cells' stages and nothing was
+  reused. `lookup` now folds in complete lines appended since the last read (per-file byte offsets; a line being
+  written is left for the next read). The same fix covers two processes or hosts sharing a store.
+- **`DataRef(alias=, relpath=)`** is a `@spec` (keyword-only like every spec), so its identity is the alias and
+  relative path, never a directory. The Pipeline binds its data roots (from `[data]`) and stat cache while it
+  fingerprints and while stages run; `ref.path()` outside a run is an error. `fingerprint_of(*refs)` hashes content:
+  blake3 per file (`b3f:`), a Merkle hash over sorted (relpath, hash) per directory (`b3d:`), dot-files skipped;
+  aliases are left out, so renaming an alias moves nothing. Stat cache: (path, size, mtime_ns, inode) → hash, one
+  append-only JSON-lines file per host under `paths.cache` (sqlite rejected: locking over NFS). `--root` runs use
+  `<root>/cache` and still resolve data through the machine's config.
+- **Experiment files** (`run/experiment.py`): `study`, `name`, `reason`, `study_name`, `[params]`, `[run] targets`,
+  `[sweep]`; unknown keys are errors. Parameters from the file and `--set` are validated against the factory's
+  signature (`get_type_hints` + msgspec `convert`, strict) before anything is built: unknown, missing and mistyped
+  parameters exit 2 having written nothing. The run record keeps the file's full text and sha256. `sweep` validates
+  every cell first, runs them in order over one store, and records `meta.sweep = {id, cell, cells, values}`; a sweep
+  file passed to `run` is refused. The trial-ledger charge is deferred to milestone 1.
+- **Environment hash** = sha256 of the Python version and implementation, the machine architecture, every installed
+  distribution with its version, and the code identity. The nearest `uv.lock` hash is recorded beside it, not hashed:
+  the installed set is what ran, and a study run outside its repository has no lock.
+- **`rerun RUN`** rebuilds from the record alone (factory reference, validated params, name, targets) in a fresh
+  directory, so every stage really runs. It fails with exit 1 before running if the signature moved (and names the
+  stages whose plan keys moved), fails with exit 1 if any output reference differs, and only warns on an environment
+  change. **`compare A B`** diffs params, per-stage spec hashes, data fingerprints, outputs, the environment
+  (distributions that differ), and the last value of every metric from the event files.
+- Found while writing the guide against real output: `show` ran without metadata, so `status`, `watch` and `runs`
+  showed `-` for the study; and rich markup ate `[fold=1]` in `compare` (and would eat any `[word]` in a reason). Both
+  fixed, with tests.
+- **User guide** in `docs/guide/` (repo-first; Laurent 2026-09-30: documents from setup to running to monitoring),
+  written against shipped behaviour with real command output; planned features are labelled as planned. The CLI
+  reference is generated from click (`scripts/gen_cli_reference.py`), and `tests/docs/` fails when it is stale, when a
+  relative link breaks, or when the guide's example study differs from `examples/momentum_study.py` (which it also
+  runs).

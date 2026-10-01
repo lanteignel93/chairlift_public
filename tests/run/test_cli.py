@@ -252,6 +252,8 @@ def test_compare_names_what_differs_between_two_runs(tmp_path):
     assert not any(s == "env" for s, _ in differ)  # same process, same environment
     text = invoke("compare", a, b, "--root", str(root)).output
     assert "window" in text and "rows differ" in text
+    assert "fit.slope[fold=1]" in text and "fit.slope[fold=3]" in text  # dimensions survive rich markup
+    assert text.index("params ") < text.index("spec ") < text.index("output ") < text.index("metric ")
 
 
 def test_show_records_the_study_so_status_and_runs_can_name_it(tmp_path):
@@ -259,3 +261,10 @@ def test_show_records_the_study_so_status_and_runs_can_name_it(tmp_path):
     invoke("show", TOY, "report", "--root", str(root))
     rec = _records(root)[-1]
     assert rec["meta"]["name"] == "toy" and rec["reason"] == "show report" and rec["targets"] == ["report"]
+
+
+def test_user_text_in_tables_is_not_eaten_as_rich_markup(tmp_path):
+    root = str(tmp_path / "toy")
+    invoke("run", TOY, "--root", root, "--target", "sources", "--reason", "retry [bold] after [fold=1] fix")
+    assert "retry [bold] after [fold=1] fix" in invoke("runs", "--root", root).output
+    assert "retry [bold] after [fold=1] fix" in invoke("log", "--root", root).output

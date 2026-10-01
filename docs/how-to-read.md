@@ -1,8 +1,9 @@
 # How to read chairlift's outputs
 
-## The manifest (`<root>/manifest.jsonl`)
+## The manifest (`<home>/store/manifest.<host>.jsonl`, or `<root>/manifest.jsonl` for a `--root` run)
 
-One JSON object per stage build, appended in build order; nothing is ever rewritten.
+One JSON object per stage build, appended in build order; nothing is ever rewritten. A shared store has one file per
+host (each file has one writer); lookups read them all.
 
 | field | meaning |
 |---|---|
@@ -14,7 +15,8 @@ One JSON object per stage build, appended in build order; nothing is ever rewrit
 | `output` | artifact ref `parquet:<sha256>` or `json:<sha256>` in `<root>/store/objects/` |
 | `code` | `chairlift <version> @ <commit>[+dirty]`: provenance, not part of the key |
 | `reason` | why the stage ran: the caller's reason, or the runner's (new key, missing object, volatile source) |
-| `built_at` | UTC timestamp |
+| `built_at` | UTC timestamp (microseconds; orders builds across hosts) |
+| `host` | the machine that built it (absent in records from before 2026-10-01) |
 
 Reading a rebuild: find the stages whose key changed, and for each, which of its parts changed — a spec hash means a
 parameter moved, an input ref means something upstream produced different bytes, a version means the code declared

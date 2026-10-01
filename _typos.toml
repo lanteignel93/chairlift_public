@@ -1,5 +1,8 @@
 [files]
 extend-exclude = ["uv.lock", "tests/__snapshots__/**"]
 
+[default]
+extend-ignore-re = ["\\b[0-9a-f]{12,64}\\b"]  # hashes, keys and run-id suffixes in docs and output
+
 [default.extend-words]
 TPE = "TPE"  # Tree-structured Parzen Estimator (Optuna's sampler)
