@@ -1,0 +1,10 @@
+# One run of the toy study with a longer feature window.
+#   chairlift run examples/experiments/toy-window.toml
+study  = "chairlift.verify.toy:pipeline"
+reason = "does a longer feature window change the out-of-sample IC?"
+
+[params]
+window = 5
+
+[run]
+targets = ["evaluate"]

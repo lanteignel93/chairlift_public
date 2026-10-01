@@ -1,0 +1,12 @@
+# Window × planted-IC grid on the toy study: six cells, one run each, sharing every unchanged stage.
+#   chairlift sweep examples/experiments/toy-sweep.toml --dry-run
+#   chairlift sweep examples/experiments/toy-sweep.toml
+study  = "chairlift.verify.toy:pipeline"
+reason = "how the recovered IC degrades with window and planted signal"
+
+[run]
+targets = ["report"]
+
+[sweep]
+window = [1, 3, 5]
+ic     = [0.0, 0.1]

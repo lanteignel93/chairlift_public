@@ -120,3 +120,11 @@ def test_containers_convert_to_their_annotated_shape():
     def f(root: Path, *, cuts: tuple[float, ...] = (), names: list[str] | None = None) -> None: ...
 
     assert validate_params(f, {"cuts": [1, 2.5], "names": ["a"]}) == {"cuts": (1.0, 2.5), "names": ["a"]}
+
+
+@pytest.mark.parametrize("path", sorted((Path(__file__).parents[2] / "examples" / "experiments").glob("*.toml")))
+def test_shipped_example_experiments_load_and_validate(path: Path):
+    exp = load_experiment(path)
+    assert exp.study == "chairlift.verify.toy:pipeline"
+    for cell in exp.cells():
+        validate_params(toy.pipeline, cell)
