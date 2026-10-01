@@ -129,6 +129,31 @@ Sinks:
 
 Push is off by default and configured per host, never per study.
 
+### Design principles borrowed from a reflex-trading substrate sketch (2026-09-30)
+
+A reflex-trading substrate sketch solves a rhyming
+problem: one writer that must never stall, many consumers at different speeds, contained failures, and decisions that
+cannot wait for a round trip. Its claims map onto chairlift as follows.
+
+1. **One artifact, extensible.** The manifest and the event stream share one record shape; every line carries `kind`
+   and `schema`. A new capability is a new event kind; readers skip kinds they do not know, so old readers keep working.
+2. **Drop-not-block (the infruptor).** The runner is the single writer and never waits on a reader. Each reader
+   (watch, report timer, alert rules, collector) keeps its own byte offset. A dead or slow reader falls behind and is
+   reported as stale; it can never slow or fail a run.
+3. **Compute path and halo (the twins).** The runner and the stages are the compute path; watch, reports, alerts and
+   ledger checks are the halo. The halo informs between runs, through the spec and the ledger, never inside one.
+4. **Pre-armed authority (the reflex).** Budgets are frozen in the spec before launch: the trial budget, `MemoryMax`,
+   `WatchdogSec`, gate thresholds. The runner and systemd enforce them locally. Failure responses are pre-composed as
+   units (`OnFailure` renders the report and fires the alert) so no human is in the failure path.
+5. **Keyed demux and explicit gaps.** One collector fans run events into per-study channels in the shared tree, each its
+   own failure domain. A missed heartbeat becomes an explicit `gap` event, never silence.
+6. **Status honesty.** Every run report carries a verification panel: invariants proven by tests in this build, and
+   those assumed.
+
+From an earlier daily automation (a dead timer went unnoticed; parameters moved without a log): a dead-man's switch for
+scheduled runs (an expected run that did not happen is a critical alert), and parameters change only through the spec.
+
+
 ## Scope in v1 / out-of-scope
 
 **In v1:**
