@@ -14,8 +14,11 @@ from __future__ import annotations
 import importlib
 import importlib.util
 import json
+import os
 import re
+import socket
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -23,11 +26,14 @@ from typing import Any
 import click
 import polars as pl
 from rich.console import Console
+from rich.live import Live
 from rich.table import Table
 
 from chairlift.core.config import STARTER, ConfigError, Resolved, load_config
 from chairlift.data.manifest import Manifest
-from chairlift.run.dag import Pipeline
+from chairlift.run.dag import Pipeline, RunReport
+from chairlift.run.events import read_events
+from chairlift.run.live import RunState, apply, render, replay
 
 # ---- helpers -----------------------------------------------------------------------------------------------------
 
@@ -174,6 +180,7 @@ def main(ctx: click.Context, profile: str | None) -> None:
 @set_opt
 @target_opt
 @click.option("--reason", default="", help="Why this build; recorded on every stage that runs.")
+@click.option("--live/--no-live", default=None, help="Animate the run (default: on a terminal).")
 @json_opt
 @click.pass_obj
 def run(
@@ -184,6 +191,7 @@ def run(
     sets: tuple[str, ...],
     targets: tuple[str, ...],
     reason: str,
+    live: bool | None,
     as_json: bool,
 ) -> None:
     """Run a study's pipeline; reuse every stage whose inputs, spec and version are unchanged."""
@@ -191,6 +199,12 @@ def run(
     meta: dict[str, Any] = {"study": study, "name": b.name, "params": _parse_sets(sets)}
     if b.shared_store:
         meta["config"] = ctx.config().record()
+    animate = (sys.stdout.isatty() if live is None else live) and not as_json
+    if animate:
+        report = _run_live(b, list(targets) or None, reason, meta)
+        ran = report.ran()
+        _console().print(f"{len(ran)} ran, {len(report.results) - len(ran)} reused · {b.name} · run {report.run_id}")
+        return
     report = b.pipe.run(list(targets) or None, reason=reason, meta=meta)
     if as_json:
         click.echo(json.dumps([r.__dict__ for r in report.results.values()], indent=1))
@@ -203,6 +217,17 @@ def run(
     con.print(t)
     ran = report.ran()
     con.print(f"\n{len(ran)} ran, {len(report.results) - len(ran)} reused · {b.name} · run {report.run_id} · {b.root}")
+
+
+def _run_live(b: Built, targets: list[str] | None, reason: str, meta: dict[str, Any]) -> RunReport:
+    """Run with the live view: events fold into a state the display re-renders ten times a second."""
+    state = RunState()
+
+    def on_event(e: dict[str, Any]) -> None:
+        apply(state, e)
+
+    with Live(console=_console(), refresh_per_second=10, get_renderable=lambda: render(state), transient=False):
+        return b.pipe.run(targets, reason=reason, meta=meta, listeners=[on_event])
 
 
 @main.command()
@@ -410,3 +435,77 @@ def config_init(project: bool, force: bool) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(STARTER)
     click.echo(f"wrote {path}")
+
+
+def _latest(ctx: Ctx, root: Path | None, study_name: str | None) -> tuple[Path, dict[str, Any]]:
+    """The newest run record (and its path) for a study, or for a self-contained root."""
+    if root is not None:
+        runs_dir = root / "runs"
+    elif study_name is not None:
+        runs_dir = ctx.config().config.paths.study_dir(study_name) / "runs"
+    else:
+        candidates = list(ctx.config().config.paths.studies_dir().glob("*/runs/*.json"))
+        if not candidates:
+            raise click.UsageError("no runs recorded yet")
+        newest = max(candidates, key=lambda p: p.stem)  # run ids start with their UTC time
+        runs_dir = newest.parent
+    records = sorted(runs_dir.glob("*.json"))
+    if not records:
+        raise click.UsageError(f"no runs recorded under {runs_dir}")
+    rec_path = max(records, key=lambda p: p.stem)
+    return rec_path, json.loads(rec_path.read_text())
+
+
+def _alive(rec: dict[str, Any]) -> bool | None:
+    """Whether a run's process still exists (None when it ran on another host)."""
+    if rec.get("host") != socket.gethostname():
+        return None
+    try:
+        os.kill(int(rec["pid"]), 0)
+    except (ProcessLookupError, ValueError, KeyError):
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+@main.command()
+@root_opt
+@click.option("--study", "study_name", default=None, help="Study name (default: the most recent run of any study).")
+@click.option("--interval", default=0.25, show_default=True, help="Seconds between reads of the event file.")
+@click.option("--once", is_flag=True, help="Print the current state and exit, even if the run is still going.")
+@click.pass_obj
+def watch(ctx: Ctx, root: Path | None, study_name: str | None, interval: float, once: bool) -> None:
+    """Follow a run from its event file: the same live view as `run`, from any terminal."""
+    rec_path, rec = _latest(ctx, root, study_name)
+    events_path = rec_path.parent / f"{rec['run_id']}.events.jsonl"
+    evs, offset = read_events(events_path)
+    state = replay(evs)
+    con = _console()
+    if once or state.status in ("ok", "failed") or not sys.stdout.isatty():
+        con.print(render(state))
+        return
+    with Live(console=con, refresh_per_second=10, get_renderable=lambda: render(state)):
+        while state.status not in ("ok", "failed"):
+            time.sleep(interval)
+            new, offset = read_events(events_path, offset)
+            for ev in new:
+                apply(state, ev)
+            if not new and _alive(rec) is False:
+                state.status, state.error = "failed", "the run's process is gone (killed, or the machine restarted)"
+
+
+@main.command()
+@root_opt
+@click.option("--study", "study_name", default=None, help="Study name (default: the most recent run of any study).")
+@json_opt
+@click.pass_obj
+def status(ctx: Ctx, root: Path | None, study_name: str | None, as_json: bool) -> None:
+    """The latest run's state. Exit 0 ok, 1 failed or died, 2 still running: for scripts and timers."""
+    _, rec = _latest(ctx, root, study_name)
+    state = rec["status"]
+    if state == "running" and _alive(rec) is False:
+        state = "died"
+    out = {"run_id": rec["run_id"], "status": state, "study": rec.get("meta", {}).get("name"), "host": rec.get("host")}
+    click.echo(json.dumps(out) if as_json else f"{out['study'] or '-'}  {out['run_id']}  {state}")
+    raise SystemExit({"ok": 0, "failed": 1, "died": 1, "running": 2}.get(state, 1))

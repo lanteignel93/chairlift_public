@@ -13,6 +13,8 @@ with toy studies built on them).
 
 from __future__ import annotations
 
+import functools
+import time
 from pathlib import Path
 from typing import Any, TypedDict
 
@@ -20,6 +22,7 @@ import numpy as np
 import polars as pl
 
 from chairlift.core.spec import spec
+from chairlift.run import events
 from chairlift.run.dag import Pipeline, Stage
 
 STUDY_NAME = "toy"
@@ -90,14 +93,22 @@ def dataset(features: pl.DataFrame, sources: pl.DataFrame) -> pl.DataFrame:
     return features.join(sources.select("entity", "t0", "y"), on=["entity", "t0"])
 
 
-def fit(dataset: pl.DataFrame, folds: dict[str, list[Fold]]) -> pl.DataFrame:
+def fit(dataset: pl.DataFrame, folds: dict[str, list[Fold]], pace: float = 0.0) -> pl.DataFrame:
     preds: list[pl.DataFrame] = []
+    n = len(folds["folds"])
     for i, fold in enumerate(folds["folds"]):
+        events.progress(
+            i, n, f"fold {i + 1} of {n}: train ≤ t{fold['train_end']}, test t{fold['test_start']}–t{fold['test_end']}"
+        )
+        if pace:
+            time.sleep(pace)  # demo only: makes the live view visible on a run that takes milliseconds
         train = dataset.filter(pl.col("t0") <= fold["train_end"])
         test = dataset.filter(pl.col("t0").is_between(fold["test_start"], fold["test_end"]))
         f, y = train["f"].to_numpy(), train["y"].to_numpy()
         slope = float((f * y).sum() / (f * f).sum())
         preds.append(test.select("entity", "t0", "y", (pl.col("f") * slope).alias("pred")).with_columns(fold=pl.lit(i)))
+        events.metric("slope", slope, fold=i + 1)
+    events.progress(n, n, f"{n} folds fitted")
     return pl.concat(preds)
 
 
@@ -110,6 +121,8 @@ def evaluate(fit: pl.DataFrame) -> dict[str, Any]:
         .to_numpy()
     )
     mean, sd = float(ic.mean()), float(ic.std(ddof=1))
+    events.metric("oos_ic_mean", mean)
+    events.metric("oos_ic_t", mean / sd * np.sqrt(len(ic)))
     return {"days": len(ic), "ic_mean": round(mean, 4), "ic_t": round(mean / sd * np.sqrt(len(ic)), 2)}
 
 
@@ -117,7 +130,8 @@ def report(evaluate: dict[str, Any]) -> dict[str, str]:
     return {"line": f"OOS IC {evaluate['ic_mean']:+.4f} (t = {evaluate['ic_t']:+.2f}) over {evaluate['days']} days"}
 
 
-def pipeline(root: Path | str, *, window: int = 1, ic: float = 0.1, seed: int = 7) -> Pipeline:
+def pipeline(root: Path | str, *, window: int = 1, ic: float = 0.1, seed: int = 7, pace: float = 0.0) -> Pipeline:
+    """`pace` (seconds per fold) only slows the fit so the live view can be watched; it is not part of any spec."""
     src_spec = SourceSpec(ic=ic, seed=seed)
     return Pipeline(
         [
@@ -125,7 +139,7 @@ def pipeline(root: Path | str, *, window: int = 1, ic: float = 0.1, seed: int = 
             Stage("features", features, ("sources",), FeatureSpec(window=window)),
             Stage("folds", folds, ("sources",), FoldSpec()),
             Stage("dataset", dataset, ("features", "sources")),
-            Stage("fit", fit, ("dataset", "folds")),
+            Stage("fit", functools.partial(fit, pace=pace), ("dataset", "folds")),
             Stage("evaluate", evaluate, ("fit",)),
             Stage("report", report, ("evaluate",)),
         ],

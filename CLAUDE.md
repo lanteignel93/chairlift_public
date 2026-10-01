@@ -36,6 +36,10 @@ uv run chairlift run  chairlift.verify.toy:pipeline --root runs/toy --reason "wh
 uv run chairlift plan chairlift.verify.toy:pipeline --root runs/toy --set window=5   # dry run
 uv run chairlift show chairlift.verify.toy:pipeline report --root runs/toy
 uv run chairlift log  --root runs/toy --stage fit
+uv run chairlift run  chairlift.verify.toy:pipeline --set pace=0.4   # animated on a terminal; studies/<name> under the configured home
+uv run chairlift watch --study toy                                   # follow the latest run from its event file
+uv run chairlift status --study toy                                  # exit 0 ok · 1 failed/died · 2 running
+uv run chairlift config show --explain
 ```
 
 Set `UV_LINK_MODE=copy` on this box (the uv cache is on another filesystem).

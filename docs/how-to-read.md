@@ -30,3 +30,14 @@ executed; `StageResult.reason` says why.
 `hit`: would be reused. `run`: will execute (the reason says why). `upstream`: an input will re-run first; if it
 produces the same bytes this stage becomes a hit, otherwise it runs — the plan cannot know before the input runs.
 `chairlift run` prints the same columns plus the seconds each executed stage took.
+
+## The event stream (`<root>/runs/<run_id>.events.jsonl`)
+
+One JSON object per line, in order (`seq`). `stage_finished.status`: `hit` reused, `ran` executed, `failed` raised
+(its `error` says what). `progress` carries done / total / message from inside a stage; `metric` a name, a value and
+dimensions such as `fold`. `peak_rss_mb` is the process's peak resident memory so far (monotone over a run).
+
+## The live view (`chairlift run` on a terminal, `chairlift watch`)
+
+○ pending · spinner running · ✓ ran · · reused · ✗ failed. `shape` is rows × columns of a frame output. The progress
+bar and detail come from the stage's last `progress` call; the metrics table shows the last six metrics reported.

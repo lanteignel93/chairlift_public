@@ -77,3 +77,45 @@ def test_signature_runs_and_show(tmp_path):
     assert listed.exit_code == 0 and "first" in listed.output
     rec = json.loads(invoke("runs", "--root", root, "show", sig[:10]).output)
     assert rec["signature"] == sig and rec["meta"]["study"] == TOY
+
+
+def test_live_run_renders_the_stage_table_and_finishes(tmp_path):
+    out = invoke("run", TOY, "--root", str(tmp_path / "t"), "--live")
+    assert out.exit_code == 0
+    for stage in ("sources", "features", "fit", "evaluate", "report"):
+        assert stage in out.output
+    assert "7 ran, 0 reused" in out.output
+
+
+def test_watch_once_shows_a_finished_run(tmp_path):
+    root = str(tmp_path / "t")
+    invoke("run", TOY, "--root", root)
+    shown = invoke("watch", "--root", root, "--once")
+    assert shown.exit_code == 0 and "ok" in shown.output and "oos_ic_mean" in shown.output
+
+
+def _status(root):
+    return CliRunner().invoke(main, ["status", "--root", root, "--json"])
+
+
+def test_status_exit_codes_follow_the_latest_run(tmp_path):
+    root = tmp_path / "t"
+    invoke("run", TOY, "--root", str(root))
+    ok = _status(str(root))
+    assert ok.exit_code == 0 and json.loads(ok.output)["status"] == "ok"
+    rec_path = max((root / "runs").glob("*.json"))
+    rec = json.loads(rec_path.read_text())
+    rec_path.write_text(json.dumps(rec | {"status": "failed"}))
+    assert _status(str(root)).exit_code == 1
+    import os
+
+    rec_path.write_text(json.dumps(rec | {"status": "running", "pid": os.getpid()}))
+    assert _status(str(root)).exit_code == 2  # this process is alive
+    rec_path.write_text(json.dumps(rec | {"status": "running", "pid": 2**22 + 12345}))
+    died = _status(str(root))
+    assert died.exit_code == 1 and json.loads(died.output)["status"] == "died"
+
+
+def test_status_and_watch_without_runs_are_usage_errors(tmp_path):
+    assert CliRunner().invoke(main, ["status", "--root", str(tmp_path)]).exit_code == 2
+    assert CliRunner().invoke(main, ["watch", "--root", str(tmp_path), "--once"]).exit_code == 2

@@ -21,6 +21,7 @@ import hashlib
 import json
 import os
 import platform
+import resource
 import socket
 import time
 from collections.abc import Callable, Iterable, Mapping
@@ -29,10 +30,13 @@ from graphlib import CycleError, TopologicalSorter
 from pathlib import Path
 from typing import Any, Literal
 
+import polars as _pl
+
 from chairlift.core.identity import code_identity
 from chairlift.core.spec import canonical, spec_hash
 from chairlift.data.manifest import Manifest
 from chairlift.data.store import ArtifactStore
+from chairlift.run.events import EventLog, Listener, bound
 
 Status = Literal["hit", "ran"]
 PlanStatus = Literal["hit", "run", "upstream"]  # upstream: an input will re-run; its bytes may or may not change
@@ -190,26 +194,44 @@ class Pipeline:
         return items
 
     def run(
-        self, targets: Iterable[str] | None = None, reason: str = "", meta: Mapping[str, Any] | None = None
+        self,
+        targets: Iterable[str] | None = None,
+        reason: str = "",
+        meta: Mapping[str, Any] | None = None,
+        listeners: Iterable[Listener] = (),
     ) -> RunReport:
-        """Run the needed stages; write a run record (inputs, identity, environment, outcome) under <root>/runs/.
+        """Run the needed stages; write a run record and an event stream under <root>/runs/.
 
         `meta` is caller context recorded verbatim: the study reference, the parameters, the resolved configuration.
+        `listeners` receive every event as it is written (the live view); an exception in one never fails the run.
         """
         targets = list(targets) if targets is not None else None
         sig = self.signature(targets)
         started = dt.datetime.now(dt.UTC)
-        report = RunReport(run_id=f"{started:%Y%m%dT%H%M%SZ}-{sig.signature[:12]}", signature=sig.signature)
+        report = RunReport(run_id=self._new_run_id(started, sig.signature), signature=sig.signature)
         record = self._record(report, sig, started, targets, reason, meta)
         self._write_record(record)
+        log = EventLog(self.root / "runs" / f"{report.run_id}.events.jsonl", report.run_id, list(listeners))
+        study = (meta or {}).get("name") or (meta or {}).get("study")
+        log.emit("run_started", study=study, signature=sig.signature, stages=list(sig.plan_keys), reason=reason)
         refs: dict[str, str] = {}
+        t_run = time.perf_counter()
         try:
-            self._run_stages(sig, refs, report, reason)
+            self._run_stages(sig, refs, report, reason, log)
         except BaseException as exc:
-            record |= {"status": "failed", "error": f"{type(exc).__name__}: {exc}"}
+            err = f"{type(exc).__name__}: {exc}"
+            record |= {"status": "failed", "error": err}
+            log.emit("run_finished", status="failed", error=err, seconds=round(time.perf_counter() - t_run, 4))
             raise
         else:
             record |= {"status": "ok"}
+            log.emit(
+                "run_finished",
+                status="ok",
+                seconds=round(time.perf_counter() - t_run, 4),
+                ran=len(report.ran()),
+                reused=len(report.results) - len(report.ran()),
+            )
         finally:
             record |= {
                 "finished_at": dt.datetime.now(dt.UTC).isoformat(timespec="seconds"),
@@ -221,21 +243,57 @@ class Pipeline:
             self._write_record(record)
         return report
 
-    def _run_stages(self, sig: Signature, refs: dict[str, str], report: RunReport, reason: str) -> None:
+    def _new_run_id(self, started: dt.datetime, signature: str) -> str:
+        """`<UTC time to the microsecond>Z-<signature[:12]>`; unique within this root even for back-to-back runs."""
+        base = f"{started:%Y%m%dT%H%M%S}.{started.microsecond:06d}Z-{signature[:12]}"
+        run_id, n = base, 1
+        while (self.root / "runs" / f"{run_id}.json").exists():
+            n += 1
+            run_id = f"{base}-{n}"
+        return run_id
+
+    def _run_stages(self, sig: Signature, refs: dict[str, str], report: RunReport, reason: str, log: EventLog) -> None:
         for name in sig.plan_keys:
             stage = self.stages[name]
             input_refs = {i: refs[i] for i in stage.inputs}
             key = stage.key(input_refs, sig.fingerprints.get(name, ""))
             reuse, why, out = self._decide(stage, key)
+            log.emit("stage_started", stage=name, key=key, will="reuse" if reuse else "run", reason=why)
             if reuse and out is not None:
                 refs[name] = out
                 report.results[name] = StageResult(name, "hit", key, out, why)
+                log.emit("stage_finished", stage=name, status="hit", key=key, output=out, seconds=0.0)
                 continue
-            t0 = time.perf_counter()
-            kwargs = {i: self.store.get(refs[i]) for i in stage.inputs}
-            result = stage.fn(**kwargs) if stage.spec is None else stage.fn(stage.spec, **kwargs)
-            ref = self.store.put(result)
+            t0, c0 = time.perf_counter(), time.process_time()
+            try:
+                kwargs = {i: self.store.get(refs[i]) for i in stage.inputs}
+                with bound(log, name):
+                    result = stage.fn(**kwargs) if stage.spec is None else stage.fn(stage.spec, **kwargs)
+                ref = self.store.put(result)
+            except BaseException as exc:
+                log.emit(
+                    "stage_finished",
+                    stage=name,
+                    status="failed",
+                    key=key,
+                    seconds=round(time.perf_counter() - t0, 4),
+                    error=f"{type(exc).__name__}: {exc}",
+                )
+                raise
             seconds = time.perf_counter() - t0
+            shape = result.shape if isinstance(result, _Frame) else (None, None)
+            log.emit(
+                "stage_finished",
+                stage=name,
+                status="ran",
+                key=key,
+                output=ref,
+                seconds=round(seconds, 4),
+                cpu_seconds=round(time.process_time() - c0, 4),
+                peak_rss_mb=round(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024, 1),
+                rows=shape[0],
+                cols=shape[1],
+            )
             self.manifest.append(
                 stage=name,
                 key=key,
@@ -307,3 +365,6 @@ def _environment() -> dict[str, Any]:
         except PackageNotFoundError:
             packages[name] = "absent"
     return {"python": platform.python_version(), "platform": platform.platform(), "packages": packages}
+
+
+_Frame = _pl.DataFrame

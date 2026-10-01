@@ -116,3 +116,19 @@ module has none. Cross-cutting suites: `tests/properties/` (hypothesis), `tests/
 (each carries a marker). `tests/conftest.py` orders collection by dependency tier (core → data → … → run → verify →
 properties → golden → walkthroughs → layout) and by dependency within a tier, so the first failure is the lowest
 broken layer. `--import-mode=importlib` and `--strict-markers`.
+
+## 2026-09-30 — Event stream and live view (observability E1 + E2)
+
+`run/events.py`: one file per run, `<root>/runs/<run_id>.events.jsonl`, single writer, every line carries `kind`,
+`schema`, `run_id`, `seq`, `ts`. Kinds: run_started, stage_started, progress, metric, warning, stage_finished (hit /
+ran / failed, seconds, CPU seconds, peak RSS, rows × columns, output ref, error), run_finished. Stages report through
+`events.progress / metric / warning`, bound by a context variable, so they stay pure and the calls are no-ops outside a
+run. In-process listeners are called defensively: an exception in one is counted and swallowed. Readers keep a byte
+offset, leave a partial last line for the next read and skip corrupt lines. Events never enter keys, signatures or
+outputs (tested). `run/live.py`: a pure reducer (events → RunState) plus a rich renderer, used by `chairlift run`
+(animated on a terminal, `--live/--no-live`) and `chairlift watch` (the same view from the file, any terminal). `chairlift
+status` exits 0 ok, 1 failed or died (a run left `running` whose process is gone on this host), 2 running.
+
+Found while building it: run ids were second-resolution, so two runs of one experiment in the same second shared an
+id and appended to one event file. Run ids are now `<UTC time to the microsecond>Z-<signature[:12]>` with a collision
+suffix; regression test added.

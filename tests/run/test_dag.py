@@ -186,3 +186,11 @@ def test_plan_and_run_agree_on_a_cold_and_a_warm_store(tmp_path):
     assert {i.status for i in p.plan()} == {"run", "upstream"}
     p.run()
     assert {i.status for i in build(tmp_path)[0].plan()} == {"hit"}
+
+
+def test_back_to_back_runs_get_distinct_run_ids_and_files(tmp_path):
+    p, _ = build(tmp_path)
+    ids = {p.run().run_id for _ in range(3)}  # same experiment, well within one second
+    assert len(ids) == 3
+    assert len(list((tmp_path / "runs").glob("*.events.jsonl"))) == 3
+    assert len(list((tmp_path / "runs").glob("*.json"))) == 3
