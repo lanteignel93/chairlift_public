@@ -53,7 +53,13 @@ Built and tested: the content store and manifest, the DAG runner, signatures and
 configuration with provenance, secrets, data references with content fingerprints, experiment files and sweeps, the
 environment hash, `rerun`, `compare`, the event stream, the live view, `watch` and `status`.
 
-Planned, and not described here as if it existed: the study protocols (point-in-time data access, walk-forward folds
-that assert their embargo, fold-local fitting, evaluation with intervals, the holdout gate, the trial ledger), static
+Built since, and shown in `examples/gallery/` (slalom and VXX), not yet covered page by page:
+- walk-forward folds that assert their embargo
+- ridge and LightGBM with in-fold selection, and the ensemble
+- quantile and signal books
+- daily-book statistics with block-bootstrap intervals
+
+Planned, and not described here as if it existed: the remaining study protocols (point-in-time data access, the
+holdout gate, the trial ledger), static
 HTML reports, `chairlift submit` under systemd with a watchdog, and alert rules. The site config already accepts
 `[compute]`, `[systemd]` and `[alerts]` settings and records them with every run; nothing consumes them yet.

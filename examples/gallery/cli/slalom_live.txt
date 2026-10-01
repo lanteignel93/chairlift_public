@@ -1,0 +1,27 @@
+chairlift slalom  running   411.7s  run 20261001T135504.926066Z-8a425ccf380c
+   stage            status   seconds  shape        progress              detail                                             
+·  index            hit      0.00                                                                                           
+·  panel            hit      0.00                                                                                           
+✓  panel_nxy        ran      14.03    1046780×145                                                                           
+✓  elig_v1          ran      0.74     1046780×11                                                                            
+✓  elig_a8          ran      0.83     1046780×11                                                                            
+✓  folds            ran      0.17                                                                                           
+✓  fit_A            ran      8.21     3680358×5    ━━━━━━━━━━━━━━━━━━━━  7/7 7 folds fitted                                 
+✓  fit_B_nxy        ran      91.43    3680358×5    ━━━━━━━━━━━━━━━━━━━━  7/7 7 folds fitted                                 
+⠙  fit_G_nxy        running                        ━━━━━━━━━━━           4/7 fold 2021: train 2017-01-01 → exit ≤ 2020-12-02
+○  book_A           pending                                                                                                 
+○  ensemble_BG_nxy  pending                                                                                                 
+○  paths_A          pending                                                                                                 
+○  book_BG_nxy      pending                                                                                                 
+○  eval_A           pending                                                                                                 
+○  paths_BG_nxy     pending                                                                                                 
+○  eval_BG_nxy      pending                                                                                                 
+○  replication      pending                                                                                                 
+latest metrics
+stage      metric    value      where    
+fit_G_nxy  is_ic     +0.2168    fold=2018
+fit_G_nxy  n_inputs  +135.0000  fold=2018
+fit_G_nxy  is_ic     +0.1920    fold=2019
+fit_G_nxy  n_inputs  +135.0000  fold=2019
+fit_G_nxy  is_ic     +0.1773    fold=2020
+fit_G_nxy  n_inputs  +135.0000  fold=2020

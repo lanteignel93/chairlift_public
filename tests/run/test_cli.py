@@ -280,3 +280,13 @@ def test_watch_and_status_follow_a_named_run_not_only_the_newest(tmp_path):
     shown = invoke("watch", "--root", str(root), "--run", first[:22], "--once").output
     assert "sources" in shown and "folds" not in shown
     assert CliRunner().invoke(main, ["status", "--root", str(root), "--run", "1999"]).exit_code == 2
+
+
+def test_compare_takes_a_reused_stages_metrics_from_the_run_that_built_it(tmp_path):
+    root = tmp_path / "toy"
+    invoke("run", TOY, "--root", str(root))
+    invoke("run", TOY, "--root", str(root))  # every stage a hit: this run emitted no metric
+    a, b = (r["run_id"] for r in _records(root))
+    rows = json.loads(invoke("compare", a, b, "--root", str(root), "--json").output)["rows"]
+    metrics = [r for r in rows if r["section"] == "metric"]
+    assert metrics and all(r["same"] and r["b"] != "—" for r in metrics)

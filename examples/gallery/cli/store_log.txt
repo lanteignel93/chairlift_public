@@ -1,0 +1,15 @@
+built_at                          host         stage            v  output                 code                                  reason                                                           
+2026-10-01T14:15:07.772171+00:00  <host>       fit_ridge        1  parquet:15a546a1006a…  chairlift 0.0.1 @ cc64d8bd058e        illustrative sweep: target horizon x cost                        
+2026-10-01T14:15:10.940199+00:00  <host>       fit_gbm          1  parquet:b2fe5a2ae261…  chairlift 0.0.1 @ cc64d8bd058e        illustrative sweep: target horizon x cost                        
+2026-10-01T14:15:11.018752+00:00  <host>       ensemble         1  parquet:4fa3bc883d14…  chairlift 0.0.1 @ cc64d8bd058e        illustrative sweep: target horizon x cost                        
+2026-10-01T14:15:11.382367+00:00  <host>       evaluate         1  json:65a8a7d4fe48b6d…  chairlift 0.0.1 @ cc64d8bd058e        illustrative sweep: target horizon x cost                        
+2026-10-01T14:15:11.832957+00:00  <host>       evaluate         1  json:5d55897543addcf…  chairlift 0.0.1 @ cc64d8bd058e        illustrative sweep: target horizon x cost                        
+2026-10-01T14:15:12.381027+00:00  <host>       fit_B_nxy        1  parquet:ed5335d7bbdd…  chairlift 0.0.1 @ 53eff0d1a506+dirty  rebuild under FitSpec v1 + cross_section field; determinism check
+2026-10-01T14:25:02.836485+00:00  <host>       fit_G_nxy        1  parquet:46ab62ebd666…  chairlift 0.0.1 @ 53eff0d1a506+dirty  rebuild under FitSpec v1 + cross_section field; determinism check
+2026-10-01T14:25:04.342502+00:00  <host>       ensemble_BG_nxy  1  parquet:894cde3fffdf…  chairlift 0.0.1 @ 53eff0d1a506+dirty  rebuild under FitSpec v1 + cross_section field; determinism check
+2026-10-01T14:25:04.882807+00:00  <host>       book_BG_nxy      1  parquet:add7fc7f8ba2…  chairlift 0.0.1 @ 53eff0d1a506+dirty  rebuild under FitSpec v1 + cross_section field; determinism check
+2026-10-01T14:25:28.989804+00:00  <host>       paths_BG_nxy     1  parquet:cd5fc85fd537…  chairlift 0.0.1 @ 53eff0d1a506+dirty  rebuild under FitSpec v1 + cross_section field; determinism check
+2026-10-01T14:25:29.879163+00:00  <host>       eval_BG_nxy      1  json:d6838a1154e0bb9…  chairlift 0.0.1 @ 53eff0d1a506+dirty  rebuild under FitSpec v1 + cross_section field; determinism check
+2026-10-01T14:25:30.729908+00:00  <host>       replication      1  json:6a5556b3d217270…  chairlift 0.0.1 @ 53eff0d1a506+dirty  rebuild under FitSpec v1 + cross_section field; determinism check
+
+49 keys across 1 manifest file(s)

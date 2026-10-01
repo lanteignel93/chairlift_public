@@ -1,0 +1,19 @@
+cell  horizon  cost_bp  signature   
+0     1        0.0      584e09a9b0b3
+1     1        5.0      70806ecca07d
+2     5        0.0      b4e1cc7812be
+3     5        5.0      3e688a5703ce
+4     10       0.0      0cf357f4bf87
+5     10       5.0      3a7210142174
+
+6 cell(s) planned · horizon-sweep · sweep 20261001T141500Z-e15fb888
+
+cell  horizon  cost_bp  signature     ran  reused  run_id                              
+0     1        0.0      584e09a9b0b3  6    1       20261001T141501.312315Z-584e09a9b0b3
+1     1        5.0      70806ecca07d  1    6       20261001T141506.430393Z-70806ecca07d
+2     5        0.0      b4e1cc7812be  1    6       20261001T141506.898006Z-b4e1cc7812be
+3     5        5.0      3e688a5703ce  0    7       20261001T141507.457471Z-3e688a5703ce
+4     10       0.0      0cf357f4bf87  6    1       20261001T141507.511989Z-0cf357f4bf87
+5     10       5.0      3a7210142174  1    6       20261001T141511.420908Z-3a7210142174
+
+6 cell(s) ran · horizon-sweep · sweep 20261001T141501Z-e15fb888

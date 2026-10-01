@@ -1,0 +1,11 @@
+stage      recorded              reproduced                     
+index      parquet:7748b4c6f187  parquet:7748b4c6f187  identical
+panel      parquet:e45fe74137a2  parquet:e45fe74137a2  identical
+folds      json:d1b860432957f51  json:d1b860432957f51  identical
+fit_ridge  parquet:bb853d55601e  parquet:bb853d55601e  identical
+fit_gbm    parquet:31b297ef1845  parquet:31b297ef1845  identical
+ensemble   parquet:791f3be2a9cd  parquet:791f3be2a9cd  identical
+evaluate   json:1e11b22a0215afb  json:1e11b22a0215afb  identical
+
+20261001T141507.457471Z-3e688a5703ce: reproduced bit for bit
+exit 0

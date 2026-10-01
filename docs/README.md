@@ -36,4 +36,12 @@ Milestone 0 in progress. Landed:
 - the CLI: `run`, `plan`, `show`, `signature`, `sweep`, `log`, `runs`, `rerun`, `compare`, `watch`, `status`,
   `config`
 
-204 tests mirroring `src/`, three walkthroughs, and a user guide whose CLI reference is generated and checked.
+M1 core (2026-10-01):
+- walk-forward folds, cross-section and time-series transforms
+- ridge and LightGBM, in-fold cluster selection, the z-score ensemble
+- quantile and signal books, and daily-book statistics
+
+Both required clients run on it. slalom's candidate reproduces bit for bit; VXX ran with three small,
+recorded changes. See `examples/gallery/`.
+
+240 tests mirroring `src/`, three walkthroughs, and a user guide whose CLI reference is generated and checked.

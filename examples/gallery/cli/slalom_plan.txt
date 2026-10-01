@@ -1,0 +1,18 @@
+stage            status  key           reason                            
+index            hit     f3a1e40fe296  inputs, spec and version unchanged
+panel            hit     9c18a8f2f01e  inputs, spec and version unchanged
+panel_nxy        hit     10b35c4317ef  inputs, spec and version unchanged
+elig_v1          hit     2b1584272cb5  inputs, spec and version unchanged
+elig_a8          hit     b2ffefd80ffa  inputs, spec and version unchanged
+folds            hit     92aa660d5b93  inputs, spec and version unchanged
+fit_A            hit     a155679c026c  inputs, spec and version unchanged
+fit_B_nxy        hit     3bd92b6efc29  inputs, spec and version unchanged
+fit_G_nxy        hit     ec551242f5a9  inputs, spec and version unchanged
+book_A           hit     1deb9b02ecfc  inputs, spec and version unchanged
+ensemble_BG_nxy  hit     95c4e3250df6  inputs, spec and version unchanged
+paths_A          hit     64f7becc1ab1  inputs, spec and version unchanged
+book_BG_nxy      hit     6b4b235868f2  inputs, spec and version unchanged
+eval_A           hit     332642690754  inputs, spec and version unchanged
+paths_BG_nxy     hit     59590a563979  inputs, spec and version unchanged
+eval_BG_nxy      hit     cb199cfc2d16  inputs, spec and version unchanged
+replication      hit     46cc863a1cf9  inputs, spec and version unchanged

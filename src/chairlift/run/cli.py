@@ -593,14 +593,39 @@ def _cell(v: Any) -> str:
     return f"{v:.6g}" if isinstance(v, float) else str(v)
 
 
-def _last_metrics(rec_path: Path) -> dict[str, float]:
-    evs, _ = read_events(rec_path.parent / rec_path.name.replace(".json", ".events.jsonl"))  # run ids contain dots
+def _events_of(rec_path: Path) -> list[dict[str, Any]]:
+    return read_events(rec_path.parent / rec_path.name.replace(".json", ".events.jsonl"))[0]  # run ids contain dots
+
+
+def _last_metrics(rec_path: Path, search: list[Path]) -> dict[str, float]:
+    """The last value of every metric behind each stage output of a run. A reused stage reported nothing in this run,
+    so its metrics come from the run that built that output (found among the run records under `search`)."""
+    rec = json.loads(rec_path.read_text())
+    sources: dict[str, Path] = {}
+    pending: dict[str, str] = {}
+    for stage, r in rec.get("results", {}).items():
+        if r.get("status") == "ran":
+            sources[stage] = rec_path
+        else:
+            pending[stage] = r.get("output", "")
+    if pending:
+        for d in search:
+            for p in sorted(d.glob("*/runs/*.json")) + sorted(d.glob("runs/*.json")):
+                other = json.loads(p.read_text())
+                for stage, ref in list(pending.items()):
+                    built = other.get("results", {}).get(stage, {})
+                    if built.get("status") == "ran" and built.get("output") == ref:
+                        sources[stage] = p
+                        del pending[stage]
+                if not pending:
+                    break
     out: dict[str, float] = {}
-    for e in evs:
-        if e.get("kind") == "metric":
-            raw: dict[str, Any] = e.get("dims") or {}
-            dims = ",".join(f"{k}={v}" for k, v in sorted(raw.items()))
-            out[f"{e.get('stage')}.{e['name']}" + (f"[{dims}]" if dims else "")] = e["value"]
+    for path in sorted(set(sources.values())):
+        for e in _events_of(path):
+            if e.get("kind") == "metric" and sources.get(str(e.get("stage"))) == path:
+                raw: dict[str, Any] = e.get("dims") or {}
+                dims = ",".join(f"{k}={v}" for k, v in sorted(raw.items()))
+                out[f"{e.get('stage')}.{e['name']}" + (f"[{dims}]" if dims else "")] = e["value"]
     return out
 
 
@@ -645,7 +670,8 @@ def compare(ctx: Ctx, run_a: str, run_b: str, root: Path | None, show_all: bool,
     da, db = set(ea.get("distributions", [])), set(eb.get("distributions", []))
     for d in sorted(da ^ db):
         add("env", d.split("==")[0], d if d in da else "—", d if d in db else "—")
-    ma, mb = _last_metrics(_run_path(ctx, root, a)), _last_metrics(_run_path(ctx, root, b))
+    search = [root] if root is not None else [ctx.config().config.paths.studies_dir()]
+    ma, mb = _last_metrics(_run_path(ctx, root, a), search), _last_metrics(_run_path(ctx, root, b), search)
     for k in sorted(set(ma) | set(mb)):
         add("metric", k, ma.get(k, "—"), mb.get(k, "—"))
     if as_json:
