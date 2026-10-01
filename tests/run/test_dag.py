@@ -155,7 +155,7 @@ def test_rebase_shares_one_store_across_roots(tmp_path):
     assert set(first.ran()) == set(p.stages)
     second = p.rebase(tmp_path / "study2", shared).run()
     assert second.ran() == []  # a different study root, the same store: everything reused
-    assert (shared / "manifest.jsonl").exists() and not (tmp_path / "study2" / "store").exists()
+    assert any(shared.glob("manifest.*.jsonl")) and not (tmp_path / "study2" / "store").exists()
 
 
 def test_fingerprint_is_called_once_per_run(tmp_path):

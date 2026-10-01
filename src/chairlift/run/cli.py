@@ -322,21 +322,34 @@ def signature(
 def log(ctx: Ctx, root: Path | None, stage: str | None, last: int, as_json: bool) -> None:
     """Read the manifest: what was built, when, from which inputs and code, and why (default: the shared store's)."""
     path = (root if root is not None else ctx.config().config.paths.store_dir()) / "manifest.jsonl"
-    if not path.exists():
-        raise click.UsageError(f"no manifest at {path}")
-    lines = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+    manifest = Manifest(path, shared=root is None)
+    files = manifest.files()
+    if not files:
+        raise click.UsageError(f"no manifest at {path.parent}")
+    lines = sorted(
+        (json.loads(line) for f in files for line in f.read_text().splitlines() if line.strip()),
+        key=lambda r: r["built_at"],
+    )
     if stage:
         lines = [r for r in lines if r["stage"] == stage]
     lines = lines[-last:]
     if as_json:
         click.echo(json.dumps(lines, indent=1))
         return
-    t = _table("built_at", "stage", "v", "output", "code", "reason")
+    t = _table("built_at", "host", "stage", "v", "output", "code", "reason")
     for r in lines:
-        t.add_row(r["built_at"], r["stage"], str(r["version"]), r["output"][:20] + "…", r["code"], r["reason"])
+        t.add_row(
+            r["built_at"],
+            r.get("host", ""),
+            r["stage"],
+            str(r["version"]),
+            r["output"][:20] + "…",
+            r["code"],
+            r["reason"],
+        )
     con = _console()
     con.print(t)
-    con.print(f"\n{len(Manifest(path).records())} keys in the manifest")
+    con.print(f"\n{len(manifest.records())} keys across {len(files)} manifest file(s)")
 
 
 def _records(ctx: Ctx, root: Path | None, study: str | None) -> list[dict[str, Any]]:

@@ -40,7 +40,7 @@ def test_study_runs_under_home_studies_name_and_shares_the_store(tmp_path: Path)
     assert out.exit_code == 0
     home = tmp_path / "m1" / "chairlift_home"
     assert list((home / "studies" / "toy" / "runs").glob("*.json"))
-    assert (home / "store" / "manifest.jsonl").exists() and not (home / "studies" / "toy" / "store").exists()
+    assert any((home / "store").glob("manifest.*.jsonl")) and not (home / "studies" / "toy" / "store").exists()
 
 
 def test_two_studies_reuse_each_others_stages_through_the_shared_store(tmp_path: Path):

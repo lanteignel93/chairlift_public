@@ -60,3 +60,45 @@ def test_records_returns_one_per_key(tmp_path: Path):
     for k in ("a", "b", "a"):
         m.append(key=k, output=ref("0"), reason="r", **COMMON)
     assert sorted(r.key for r in m.records()) == ["a", "b"]
+
+
+# ---- shared stores: one file per host --------------------------------------------------------------------------------
+
+
+def test_shared_manifest_writes_one_file_per_host_and_reads_them_all(tmp_path: Path):
+    a = Manifest(tmp_path / "manifest.jsonl", shared=True, host="boxA")
+    b = Manifest(tmp_path / "manifest.jsonl", shared=True, host="boxB")
+    a.append(key="ka", output=ref("0"), reason="built on A", **COMMON)
+    b.append(key="kb", output=ref("1"), reason="built on B", **COMMON)
+    assert sorted(p.name for p in tmp_path.glob("*.jsonl")) == ["manifest.boxA.jsonl", "manifest.boxB.jsonl"]
+    reader = Manifest(tmp_path / "manifest.jsonl", shared=True, host="boxC")
+    ka, kb = reader.lookup("ka"), reader.lookup("kb")
+    assert ka is not None and kb is not None  # each host reuses the other's work
+    assert (ka.host, kb.host) == ("boxA", "boxB")
+    assert not (tmp_path / "manifest.boxC.jsonl").exists()  # reading never creates a file
+
+
+def test_shared_manifest_resolves_one_key_built_on_two_hosts_by_time(tmp_path: Path):
+    a = Manifest(tmp_path / "manifest.jsonl", shared=True, host="boxA")
+    a.append(key="k", output=ref("0"), reason="first", **COMMON)
+    b = Manifest(tmp_path / "manifest.jsonl", shared=True, host="boxB")
+    b.append(key="k", output=ref("1"), reason="later", **COMMON)
+    rec = Manifest(tmp_path / "manifest.jsonl", shared=True, host="x").lookup("k")
+    assert rec is not None and rec.reason == "later"
+
+
+def test_old_records_without_a_host_still_load(tmp_path: Path):
+    path = tmp_path / "manifest.jsonl"
+    line = {
+        "stage": "s",
+        "key": "k",
+        "version": 1,
+        "spec_hash": "h",
+        "inputs": {},
+        "output": ref("0"),
+        "code": "c",
+        "reason": "r",
+        "built_at": "2026-09-30T00:00:00+00:00",
+    }
+    path.write_text(json.dumps(line) + "\n")
+    assert Manifest(path, shared=True, host="h").lookup("k") is not None

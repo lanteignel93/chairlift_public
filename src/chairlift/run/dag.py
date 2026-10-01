@@ -119,7 +119,7 @@ class Pipeline:
             self.manifest = Manifest(self.root / "manifest.jsonl")
         else:
             self.store = ArtifactStore(Path(store))
-            self.manifest = Manifest(Path(store) / "manifest.jsonl")
+            self.manifest = Manifest(Path(store) / "manifest.jsonl", shared=True)
 
     def rebase(self, root: Path | str, store: Path | str | None = None) -> Pipeline:
         """The same stages over another run root and store (how the CLI places a study under the configured home)."""
