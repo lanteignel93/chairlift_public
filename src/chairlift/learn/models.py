@@ -26,6 +26,7 @@ class Estimator(Protocol):
 @spec(name="Ridge", version=1)
 class RidgeSpec:
     alpha: float = 1e-3
+    intercept: bool = False  # cross-section: irrelevant to a ranking; time series: the training mean is the carry
 
 
 @spec(name="LightGBM", version=1)
@@ -33,14 +34,16 @@ class LightGBMSpec:
     params: Mapping[str, Any]  # LGBMRegressor keyword arguments, n_estimators included
     seeds: tuple[int, ...] = (0,)
     threads: int = 16
+    deterministic: bool = True  # bit-identical refits on any thread count (LightGBM's deterministic + col-wise)
 
 
 ModelSpec = RidgeSpec | LightGBMSpec
 
 
 class Ridge:
-    def __init__(self, alpha: float) -> None:
+    def __init__(self, alpha: float, intercept: bool = False) -> None:
         self.alpha = alpha
+        self.intercept = intercept
 
     def fit(self, X: np.ndarray, y: np.ndarray) -> Ridge:
         self.mu = X.mean(0)
@@ -52,10 +55,16 @@ class Ridge:
         return self
 
     def predict(self, X: np.ndarray) -> np.ndarray:
-        return ((X - self.mu) / self.sd) @ self.w  # no intercept: rankings and IC are what is read
+        z = ((X - self.mu) / self.sd) @ self.w
+        return z + self.ym if self.intercept else z
 
     def describe(self) -> dict[str, Any]:
-        return {"kind": "ridge", "alpha": self.alpha, "coef_standardised": [float(v) for v in self.w]}
+        return {
+            "kind": "ridge",
+            "alpha": self.alpha,
+            "intercept": self.ym if self.intercept else None,
+            "coef_standardised": [float(v) for v in self.w],
+        }
 
 
 class LightGBM:
@@ -66,6 +75,8 @@ class LightGBM:
         lgb: Any = importlib.import_module("lightgbm")  # the `ml` extra; untyped
         p = {k: v for k, v in self.spec.params.items() if k != "n_estimators"}
         p.update(objective="regression", verbose=-1, num_threads=self.spec.threads)
+        if self.spec.deterministic:
+            p.update(deterministic=True, force_col_wise=True)
         n = int(self.spec.params.get("n_estimators", 100))
         self.models: list[Any] = [
             lgb.LGBMRegressor(n_estimators=n, random_state=s, **p).fit(X, y) for s in self.spec.seeds
@@ -82,5 +93,5 @@ class LightGBM:
 
 def build(s: ModelSpec) -> Estimator:
     if isinstance(s, RidgeSpec):
-        return Ridge(s.alpha)
+        return Ridge(s.alpha, s.intercept)
     return LightGBM(s)

@@ -54,3 +54,16 @@ def constant_book(frame: pl.DataFrame, position: float, b: SignalBook, start: dt
     x = x.with_columns(position=pl.lit(position))
     turn = (pl.col("position") - pl.col("position").shift(1).fill_null(0.0)).abs()
     return x.with_columns(turnover=turn, pnl=pl.col("position") * pl.col(b.ret) - b.cost * turn)
+
+
+def rule_book(frame: pl.DataFrame, position: str, b: SignalBook, start: dt.date, end: dt.date) -> pl.DataFrame:
+    """A rule as a book: the position is a column of `frame` known at t (a volatility target, a term-structure
+    switch), clipped to the book's bounds, with the same next-return and turnover-cost accounting."""
+    lo = 0.0 if b.long_only else -b.cap
+    hi = 0.0 if b.short_only else b.cap
+    x = frame.filter(pl.col(b.date).is_between(start, end)).select(b.date, b.ret, position).sort(b.date)
+    x = x.with_columns(position=pl.col(position).fill_null(0.0).clip(lo, hi))
+    turn = (pl.col("position") - pl.col("position").shift(1).fill_null(0.0)).abs()
+    return x.select(b.date, b.ret, "position").with_columns(
+        turnover=turn, pnl=pl.col("position") * pl.col(b.ret) - b.cost * turn
+    )

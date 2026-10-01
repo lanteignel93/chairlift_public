@@ -1,5 +1,7 @@
 """The rebuild rules of the design page, as tests: a change re-runs exactly the stages downstream of it."""
 
+from pathlib import Path
+
 import polars as pl
 import pytest
 
@@ -194,3 +196,40 @@ def test_back_to_back_runs_get_distinct_run_ids_and_files(tmp_path):
     assert len(ids) == 3
     assert len(list((tmp_path / "runs").glob("*.events.jsonl"))) == 3
     assert len(list((tmp_path / "runs").glob("*.json"))) == 3
+
+
+# ---- captured values ------------------------------------------------------------------------------------------------
+
+
+def test_a_value_captured_by_a_stage_function_is_part_of_its_identity(tmp_path: Path):
+    def make(mode: str) -> Pipeline:
+        return Pipeline([Stage("src", lambda: {"mode": mode}, fingerprint=lambda: "v")], tmp_path)
+
+    a, b = make("published").run(), make("peek").run()
+    assert b.ran() == ["src"] and a.signature != b.signature  # before: the second run was served the first's output
+    assert make("peek").run().ran() == []
+
+
+def test_partial_arguments_count_and_ignore_excludes_them(tmp_path: Path):
+    import functools
+
+    def f(x: int, pace: float = 0.0) -> dict[str, int]:
+        return {"x": x}
+
+    s1 = Stage("s", functools.partial(f, 1, pace=0.1), fingerprint=lambda: "v", ignore=("pace",))
+    s2 = Stage("s", functools.partial(f, 1, pace=9.0), fingerprint=lambda: "v", ignore=("pace",))
+    s3 = Stage("s", functools.partial(f, 2, pace=0.1), fingerprint=lambda: "v", ignore=("pace",))
+    assert s1.key({}) == s2.key({}) != s3.key({})
+
+
+def test_capturing_something_unhashable_fails_when_the_pipeline_is_built():
+    frame = pl.DataFrame({"x": [1]})
+    with pytest.raises(ValueError, match="frame"):
+        Stage("s", lambda: frame.height, fingerprint=lambda: "v")
+
+
+def test_stages_that_capture_nothing_keep_their_keys():
+    def f() -> int:
+        return 1
+
+    assert Stage("s", f).captured_hash == ""

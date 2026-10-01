@@ -24,6 +24,9 @@ class DailyStatsSpec:
     seed: int = 0
     block: int = 21
     alpha: float = 0.01  # two-sided CI level 1 − alpha
+    periods: int = 252  # observations per year: 252 daily, 12 monthly (annualisation)
+    min_per_year: int = 60  # a calendar year enters the by-year table with at least this many observations
+    min_per_half: int = 40
 
 
 def daily_book(
@@ -54,8 +57,8 @@ def daily_book(
     return day.filter(pl.col("date") <= end) if end is not None else day
 
 
-def _sharpe(x: np.ndarray) -> float:
-    return float(x.mean() / (x.std(ddof=1) + 1e-12) * np.sqrt(252))
+def _sharpe(x: np.ndarray, periods: int = 252) -> float:
+    return float(x.mean() / (x.std(ddof=1) + 1e-12) * np.sqrt(periods))
 
 
 def daily_stats(x: np.ndarray, dates: Sequence[dt.date], s: DailyStatsSpec) -> dict[str, Any]:
@@ -69,16 +72,18 @@ def daily_stats(x: np.ndarray, dates: Sequence[dt.date], s: DailyStatsSpec) -> d
     idx = (starts[:, :, None] + np.arange(s.block)[None, None, :]).reshape(s.n_boot, -1)[:, :n]
     B = x[idx]
     m_b = B.mean(1)
-    sh_b = m_b / (B.std(1, ddof=1) + 1e-12) * np.sqrt(252)
+    sh_b = m_b / (B.std(1, ddof=1) + 1e-12) * np.sqrt(s.periods)
     cum = np.cumsum(x)
-    by_year = {int(y): _sharpe(x[years == y]) for y in np.unique(years) if (years == y).sum() >= 60}
+    by_year = {
+        int(y): _sharpe(x[years == y], s.periods) for y in np.unique(years) if (years == y).sum() >= s.min_per_year
+    }
     half = np.array([f"{d.year}H{1 if d.month <= 6 else 2}" for d in dates])
-    by_half = {k: _sharpe(x[half == k]) for k in sorted(set(half)) if (half == k).sum() >= 40}
+    by_half = {k: _sharpe(x[half == k], s.periods) for k in sorted(set(half)) if (half == k).sum() >= s.min_per_half}
     return {
         "n_days": n,
         "mean_per_day": float(x.mean()),
         "sd_per_day": float(x.std(ddof=1)),
-        "sharpe": _sharpe(x),
+        "sharpe": _sharpe(x, s.periods),
         "sharpe_ci": [float(np.quantile(sh_b, lo)), float(np.quantile(sh_b, hi))],
         "mean_ci": [float(np.quantile(m_b, lo)), float(np.quantile(m_b, hi))],
         "p_mean_le_0": float((m_b <= 0).mean()),
@@ -137,4 +142,29 @@ def ts_ic_by_year(frame: pl.DataFrame, pred: str = "pred", target: str = "y", da
         "oos_ic_mean": float(v.mean()),
         "oos_ic_worst_year": float(v.min()),
         "oos_ic_by_year": {int(y): float(c) for y, c in zip(ic["year"], v, strict=True)},
+    }
+
+
+def paired_sharpe_diff(x1: np.ndarray, x2: np.ndarray, s: DailyStatsSpec) -> dict[str, Any]:
+    """Sharpe(x2) − Sharpe(x1) on the same days, with a paired moving-block bootstrap: the same blocks are drawn for
+    both series, so the common component cancels and the interval is that of the difference itself."""
+    a, b = np.asarray(x1, float), np.asarray(x2, float)
+    if len(a) != len(b):
+        raise ValueError("paired series must cover the same days")
+    n = len(a)
+    rng = np.random.default_rng(s.seed)
+    nb = int(np.ceil(n / s.block))
+    starts = rng.integers(0, n - s.block + 1, size=(s.n_boot, nb))
+    idx = (starts[:, :, None] + np.arange(s.block)[None, None, :]).reshape(s.n_boot, -1)[:, :n]
+
+    def sh(m: np.ndarray) -> np.ndarray:
+        return m.mean(1) / (m.std(1, ddof=1) + 1e-12) * np.sqrt(s.periods)
+
+    d = sh(b[idx]) - sh(a[idx])
+    lo, hi = s.alpha / 2, 1 - s.alpha / 2
+    return {
+        "d_sharpe": _sharpe(b, s.periods) - _sharpe(a, s.periods),
+        "d_sharpe_ci": [float(np.quantile(d, lo)), float(np.quantile(d, hi))],
+        "p_d_le_0": float((d <= 0).mean()),
+        "corr": float(np.corrcoef(a, b)[0, 1]),
     }

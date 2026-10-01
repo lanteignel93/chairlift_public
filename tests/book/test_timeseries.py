@@ -37,3 +37,11 @@ def test_sign_and_one_sided_books():
 def test_constant_baseline_pays_one_entry_cost():
     B = constant_book(FRAME, -1.0, SignalBook(cost=0.001), D[0], D[-1])
     assert B["turnover"].sum() == 1.0 and B["pnl"][0] == pytest.approx(-0.01 - 0.001)
+
+
+def test_rule_book_reads_positions_from_a_column_and_clips_to_the_book():
+    from chairlift.book.timeseries import rule_book
+
+    f = FRAME.with_columns(pos=pl.Series([-2.0, -0.5, 0.0, None, 1.0]))
+    B = rule_book(f, "pos", SignalBook(short_only=True), D[0], D[-1])
+    assert B["position"].to_list() == [-1.0, -0.5, 0.0, 0.0, 0.0]

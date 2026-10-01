@@ -69,3 +69,15 @@ def test_time_series_ic_reads_across_rows():
     f = pl.DataFrame({"date": d, "pred": [1.0, 2.0, 3.0, 4.0] * 2, "y": [1.0, 2.0, 3.0, 4.0, 4.0, 3.0, 2.0, 1.0]})
     ic = ts_ic_by_year(f)
     assert ic["oos_ic_by_year"] == {2018: 1.0, 2019: -1.0} and ic["oos_ic_all"] == pytest.approx(0.0)
+
+
+def test_paired_difference_cancels_the_common_component():
+    from chairlift.evaluate.daily import paired_sharpe_diff
+
+    rng = np.random.default_rng(1)
+    common = rng.standard_normal(2000)
+    a = 0.02 + common
+    b = 0.06 + common + 0.1 * rng.standard_normal(2000)
+    r = paired_sharpe_diff(a, b, DailyStatsSpec(n_boot=400, seed=2))
+    assert r["d_sharpe"] > 0 and r["d_sharpe_ci"][0] > 0  # unpaired, these CIs would overlap entirely
+    assert r["corr"] > 0.99

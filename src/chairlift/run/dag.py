@@ -19,6 +19,7 @@ from __future__ import annotations
 import datetime as dt
 import functools
 import hashlib
+import inspect
 import json
 import os
 import platform
@@ -29,12 +30,12 @@ from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from graphlib import CycleError, TopologicalSorter
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 import polars as _pl
 
 from chairlift.core.identity import code_identity
-from chairlift.core.spec import canonical, spec_hash
+from chairlift.core.spec import SpecError, canonical, is_spec, spec_hash
 from chairlift.data.manifest import Manifest
 from chairlift.data.refs import StatCache, bind
 from chairlift.data.store import ArtifactStore
@@ -42,6 +43,50 @@ from chairlift.run.events import EventLog, Listener, bound
 
 Status = Literal["hit", "ran"]
 PlanStatus = Literal["hit", "run", "upstream"]  # upstream: an input will re-run; its bytes may or may not change
+
+
+def captured(fn: Callable[..., Any], ignore: Iterable[str] = ()) -> dict[str, Any]:
+    """The values a stage function carries from outside its arguments: closure cells and functools.partial arguments.
+
+    They change what the stage computes as surely as its spec does, so they are part of its identity. Functions,
+    classes and modules are code (covered by `version`, like the stage function itself) and are skipped.
+    """
+    skip = set(ignore)
+    out: dict[str, Any] = {}
+    seen: set[int] = set()
+
+    def walk(f: Any, prefix: str) -> None:
+        if id(f) in seen:
+            return
+        seen.add(id(f))
+        if isinstance(f, functools.partial):
+            part = cast("functools.partial[Any]", f)
+            for i, a in enumerate(part.args):
+                put(f"{prefix}arg{i}", a)
+            for k, v in part.keywords.items():
+                put(prefix + k, v)
+            walk(part.func, prefix)
+            return
+        code = getattr(f, "__code__", None)
+        cells = getattr(f, "__closure__", None)
+        if code is None or not cells:
+            return
+        for name, cell in zip(code.co_freevars, cells, strict=True):
+            try:
+                put(prefix + name, cell.cell_contents)
+            except ValueError:  # an empty cell: a name assigned after the function was defined
+                continue
+
+    def put(name: str, value: Any) -> None:
+        if name in skip or name.split(".")[-1] in skip:
+            return
+        if (callable(value) and not is_spec(value)) or inspect.ismodule(value) or isinstance(value, type):
+            walk(value, name + ".")
+            return
+        out[name] = value
+
+    walk(fn, "")
+    return dict(sorted(out.items()))
 
 
 @dataclass(frozen=True)
@@ -52,14 +97,30 @@ class Stage:
     spec: Any = None
     version: int = 1
     fingerprint: Callable[[], str] | None = None  # required for a source stage to be cacheable
+    ignore: tuple[str, ...] = ()  # captured names deliberately left out of the identity (they cannot change a result)
+    captured_hash: str = field(init=False, default="")
+
+    def __post_init__(self) -> None:
+        values = captured(self.fn, self.ignore)
+        try:
+            digest = spec_hash(values) if values else ""
+        except SpecError as exc:
+            names = ", ".join(f"{k} ({type(v).__name__})" for k, v in values.items())
+            raise ValueError(
+                f"stage {self.name!r} captures values that cannot be part of its identity: {names}. Put them in the"
+                f" stage's spec, pass them as an input, or list them in ignore= if they cannot change a result ({exc})"
+            ) from exc
+        object.__setattr__(self, "captured_hash", digest)
 
     def key(self, input_refs: Mapping[str, str], fingerprint: str = "") -> str:
         parts = [self.name, str(self.version), spec_hash(self.spec), fingerprint]
+        parts += [f"captured={self.captured_hash}"] if self.captured_hash else []
         parts += [f"{k}={input_refs[k]}" for k in sorted(input_refs)]
         return hashlib.sha256("\x1f".join(parts).encode()).hexdigest()
 
     def plan_key(self, input_plan_keys: Mapping[str, str], fingerprint: str = "") -> str:
         parts = ["plan", self.name, str(self.version), spec_hash(self.spec), fingerprint]
+        parts += [f"captured={self.captured_hash}"] if self.captured_hash else []
         parts += [f"{k}={input_plan_keys[k]}" for k in sorted(input_plan_keys)]
         return hashlib.sha256("\x1f".join(parts).encode()).hexdigest()
 
@@ -354,6 +415,7 @@ class Pipeline:
                 "spec": canonical(st.spec),
                 "spec_hash": spec_hash(st.spec),
                 "fingerprint": sig.fingerprints.get(name),
+                "captured": canonical(captured(st.fn, st.ignore)),
                 "inputs": list(st.inputs),
                 "plan_key": plan_key,
             }

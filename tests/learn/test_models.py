@@ -39,3 +39,25 @@ def test_lightgbm_is_seeded_and_averages_seeds():
     np.testing.assert_array_equal(a.predict(X), b.predict(X))
     assert len(a.describe()["gain_importance_mean"]) == 3
     assert np.corrcoef(a.predict(X), y)[0, 1] > 0.8
+
+
+def test_ridge_intercept_adds_the_training_mean_only_when_asked():
+    X, y = data()
+    y = y + 3.0
+    off, on = Ridge(1e-6).fit(X, y), Ridge(1e-6, intercept=True).fit(X, y)
+    np.testing.assert_allclose(on.predict(X) - off.predict(X), y.mean())
+
+
+def test_lightgbm_deterministic_refits_are_bit_identical_on_many_threads():
+    pytest.importorskip("lightgbm")
+    X, y = data(3000)
+    params = {
+        "n_estimators": 30,
+        "num_leaves": 8,
+        "min_child_samples": 20,
+        "feature_fraction": 0.7,
+        "bagging_fraction": 0.8,
+        "bagging_freq": 1,
+    }
+    s = LightGBMSpec(params=params, seeds=(0, 1), threads=8)
+    np.testing.assert_array_equal(build(s).fit(X, y).predict(X), build(s).fit(X, y).predict(X))

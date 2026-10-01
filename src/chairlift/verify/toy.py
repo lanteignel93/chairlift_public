@@ -139,7 +139,7 @@ def pipeline(root: Path | str, *, window: int = 1, ic: float = 0.1, seed: int = 
             Stage("features", features, ("sources",), FeatureSpec(window=window)),
             Stage("folds", folds, ("sources",), FoldSpec()),
             Stage("dataset", dataset, ("features", "sources")),
-            Stage("fit", functools.partial(fit, pace=pace), ("dataset", "folds")),
+            Stage("fit", functools.partial(fit, pace=pace), ("dataset", "folds"), ignore=("pace",)),
             Stage("evaluate", evaluate, ("fit",)),
             Stage("report", report, ("evaluate",)),
         ],
