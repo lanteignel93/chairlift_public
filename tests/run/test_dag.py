@@ -233,3 +233,37 @@ def test_stages_that_capture_nothing_keep_their_keys():
         return 1
 
     assert Stage("s", f).captured_hash == ""
+
+
+# ---- code identity --------------------------------------------------------------------------------------------------
+
+
+def _helper_v1() -> int:
+    return 1
+
+
+def _helper_v2() -> int:
+    return 2
+
+
+def test_editing_a_helper_a_stage_calls_changes_the_stage_key():
+    from chairlift.run.dag import code_digest
+
+    def stage_a() -> int:
+        return _helper_v1()
+
+    def stage_b() -> int:
+        return _helper_v2()
+
+    assert code_digest(stage_a) != code_digest(stage_b)  # same body shape, different helper reached
+    assert code_digest(lambda: _helper_v1()) != code_digest(lambda: _helper_v2())
+    assert code_digest(stage_a) == code_digest(stage_a)
+
+
+def test_library_code_is_not_part_of_the_digest():
+    from chairlift.run.dag import code_digest
+
+    def uses_polars() -> pl.DataFrame:
+        return pl.DataFrame({"x": [1]})
+
+    assert len(code_digest(uses_polars)) == 64  # polars' own source is not walked (other module)

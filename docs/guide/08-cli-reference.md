@@ -16,6 +16,9 @@ Conventions shared by most commands:
 - [`chairlift config check`](#chairlift-config-check)
 - [`chairlift config init`](#chairlift-config-init)
 - [`chairlift config show`](#chairlift-config-show)
+- [`chairlift holdout`](#chairlift-holdout)
+- [`chairlift holdout open`](#chairlift-holdout-open)
+- [`chairlift ledger`](#chairlift-ledger)
 - [`chairlift log`](#chairlift-log)
 - [`chairlift plan`](#chairlift-plan)
 - [`chairlift rerun`](#chairlift-rerun)
@@ -107,6 +110,48 @@ Print the resolved site configuration for this machine.
 | option | meaning |
 |---|---|
 | `--explain` | Show which layer set each value. |
+| `--json` | Machine-readable output. |
+
+<a id="chairlift-holdout"></a>
+
+## `chairlift holdout`
+
+```
+chairlift holdout [OPTIONS] COMMAND [ARGS]...
+```
+
+The holdout gate: one look, recorded.
+
+<a id="chairlift-holdout-open"></a>
+
+## `chairlift holdout open`
+
+```
+chairlift holdout open [OPTIONS]
+```
+
+Open the study's holdout. Irreversible: the next runs read holdout rows, and the ledger keeps the moment.
+
+| option | meaning |
+|---|---|
+| `--root PATH` | A self-contained run directory (own store). Default: &lt;paths.home&gt;/studies/&lt;name&gt;, shared store. |
+| `--study TEXT` | Study name. |
+| `--reason TEXT` | Why now: what was frozen, and what will be read.  [required] |
+
+<a id="chairlift-ledger"></a>
+
+## `chairlift ledger`
+
+```
+chairlift ledger [OPTIONS]
+```
+
+The study's trials (one per signature) and the deflated Sharpe of the best, given how many were tried.
+
+| option | meaning |
+|---|---|
+| `--root PATH` | A self-contained run directory (own store). Default: &lt;paths.home&gt;/studies/&lt;name&gt;, shared store. |
+| `--study TEXT` | Study name. |
 | `--json` | Machine-readable output. |
 
 <a id="chairlift-log"></a>

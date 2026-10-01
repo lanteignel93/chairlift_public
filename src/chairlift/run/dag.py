@@ -39,6 +39,8 @@ from chairlift.core.spec import SpecError, canonical, is_spec, spec_hash
 from chairlift.data.manifest import Manifest
 from chairlift.data.refs import StatCache, bind
 from chairlift.data.store import ArtifactStore
+from chairlift.ledger.holdout import bind_ledger
+from chairlift.ledger.trials import Headline, Ledger, dig
 from chairlift.run.events import EventLog, Listener, bound
 
 Status = Literal["hit", "ran"]
@@ -89,6 +91,53 @@ def captured(fn: Callable[..., Any], ignore: Iterable[str] = ()) -> dict[str, An
     return dict(sorted(out.items()))
 
 
+def code_digest(fn: Callable[..., Any]) -> str:
+    """sha256 over the source of a stage function and of every function of the same module it reaches by name,
+    transitively (helpers called from a lambda included). Editing study code re-runs exactly the stages whose code
+    changed; code in other modules (chairlift, libraries) is covered by `version` and the environment hash."""
+    seen: dict[str, str] = {}
+
+    def code_of(f: Any) -> Any:
+        while isinstance(f, functools.partial):
+            f = cast("functools.partial[Any]", f).func
+        return getattr(f, "__code__", None), f
+
+    def names(code: Any) -> set[str]:
+        out = set(code.co_names)
+        for c in code.co_consts:
+            if inspect.iscode(c):
+                out |= names(c)
+        return out
+
+    def visit(f: Any, module: str | None) -> None:
+        code, f = code_of(f)
+        if code is None:
+            return
+        key = f"{getattr(f, '__module__', '')}.{getattr(f, '__qualname__', '')}:{code.co_firstlineno}"
+        if key in seen:
+            return
+        try:
+            seen[key] = inspect.getsource(f)
+        except (OSError, TypeError):
+            seen[key] = code.co_code.hex()  # no source on disk: the bytecode is the next best identity
+        g = getattr(f, "__globals__", {})
+        for name in names(code):
+            target = g.get(name)
+            if inspect.isfunction(target) and target.__module__ == module:
+                visit(target, module)
+        for cell in getattr(f, "__closure__", None) or ():
+            try:
+                c = cell.cell_contents
+            except ValueError:
+                continue
+            if inspect.isfunction(c) and c.__module__ == module:
+                visit(c, module)
+
+    _, root = code_of(fn)
+    visit(fn, getattr(root, "__module__", None))
+    return hashlib.sha256("\x1f".join(f"{k}\x1e{v}" for k, v in sorted(seen.items())).encode()).hexdigest()
+
+
 @dataclass(frozen=True)
 class Stage:
     name: str
@@ -99,6 +148,7 @@ class Stage:
     fingerprint: Callable[[], str] | None = None  # required for a source stage to be cacheable
     ignore: tuple[str, ...] = ()  # captured names deliberately left out of the identity (they cannot change a result)
     captured_hash: str = field(init=False, default="")
+    code_hash: str = field(init=False, default="")
 
     def __post_init__(self) -> None:
         values = captured(self.fn, self.ignore)
@@ -111,15 +161,16 @@ class Stage:
                 f" stage's spec, pass them as an input, or list them in ignore= if they cannot change a result ({exc})"
             ) from exc
         object.__setattr__(self, "captured_hash", digest)
+        object.__setattr__(self, "code_hash", code_digest(self.fn))
 
     def key(self, input_refs: Mapping[str, str], fingerprint: str = "") -> str:
-        parts = [self.name, str(self.version), spec_hash(self.spec), fingerprint]
+        parts = [self.name, str(self.version), spec_hash(self.spec), fingerprint, f"code={self.code_hash}"]
         parts += [f"captured={self.captured_hash}"] if self.captured_hash else []
         parts += [f"{k}={input_refs[k]}" for k in sorted(input_refs)]
         return hashlib.sha256("\x1f".join(parts).encode()).hexdigest()
 
     def plan_key(self, input_plan_keys: Mapping[str, str], fingerprint: str = "") -> str:
-        parts = ["plan", self.name, str(self.version), spec_hash(self.spec), fingerprint]
+        parts = ["plan", self.name, str(self.version), spec_hash(self.spec), fingerprint, f"code={self.code_hash}"]
         parts += [f"captured={self.captured_hash}"] if self.captured_hash else []
         parts += [f"{k}={input_plan_keys[k]}" for k in sorted(input_plan_keys)]
         return hashlib.sha256("\x1f".join(parts).encode()).hexdigest()
@@ -189,6 +240,7 @@ class Pipeline:
             raise ValueError(f"pipeline has a cycle: {exc.args[1]}") from exc
         self.root = Path(root)
         self.data: dict[str, Path] = {k: Path(v) for k, v in (data or {}).items()}
+        self.ledger_path = self.root / "ledger.jsonl"  # the study's trials and holdout opening
         self.cache = StatCache(Path(cache)) if cache is not None else None
         if store is None:
             self.store = ArtifactStore(self.root / "store")
@@ -232,7 +284,7 @@ class Pipeline:
     def _fingerprints(self, names: Iterable[str]) -> dict[str, str]:
         """Each source's fingerprint, computed once per call (a fingerprint may hash files)."""
         out: dict[str, str] = {}
-        with bind(self.data, self.cache):
+        with bind(self.data, self.cache), bind_ledger(self.ledger_path):
             for n in names:
                 fp = self.stages[n].fingerprint
                 if fp is not None:
@@ -290,6 +342,7 @@ class Pipeline:
         reason: str = "",
         meta: Mapping[str, Any] | None = None,
         listeners: Iterable[Listener] = (),
+        headline: Headline | Mapping[str, Any] | None = None,
     ) -> RunReport:
         """Run the needed stages; write a run record and an event stream under <root>/runs/.
 
@@ -316,6 +369,7 @@ class Pipeline:
             raise
         else:
             record |= {"status": "ok"}
+            self._record_trial(report, targets, reason, meta, Headline.parse(headline))
             log.emit(
                 "run_finished",
                 status="ok",
@@ -333,6 +387,36 @@ class Pipeline:
             }
             self._write_record(record)
         return report
+
+    def _record_trial(
+        self,
+        report: RunReport,
+        targets: list[str] | None,
+        reason: str,
+        meta: Mapping[str, Any] | None,
+        headline: Headline | None,
+    ) -> None:
+        """Charge the run to the study's ledger: a new signature is a new trial (a re-run is not)."""
+        numbers: dict[str, Any] | None = None
+        if headline is not None and headline.stage in report.results:
+            out = self.store.get(report.results[headline.stage].output)
+            try:
+                numbers = {
+                    "sharpe": float(dig(out, headline.sharpe)),
+                    "n_obs": int(dig(out, headline.n_obs)),
+                    "periods": headline.periods,
+                }
+            except (KeyError, TypeError, ValueError):
+                numbers = None
+        m = dict(meta or {})
+        Ledger(self.ledger_path).record_trial(
+            signature=report.signature,
+            run_id=report.run_id,
+            params={"targets": targets, **m.get("params", {})},
+            reason=reason,
+            headline=numbers,
+            sweep=m.get("sweep"),
+        )
 
     def _new_run_id(self, started: dt.datetime, signature: str) -> str:
         """`<UTC time to the microsecond>Z-<signature[:12]>`; unique within this root even for back-to-back runs."""
@@ -358,7 +442,7 @@ class Pipeline:
             t0, c0 = time.perf_counter(), time.process_time()
             try:
                 kwargs = {i: self.store.get(refs[i]) for i in stage.inputs}
-                with bound(log, name), bind(self.data, self.cache):
+                with bound(log, name), bind(self.data, self.cache), bind_ledger(self.ledger_path):
                     result = stage.fn(**kwargs) if stage.spec is None else stage.fn(stage.spec, **kwargs)
                 ref = self.store.put(result)
             except BaseException as exc:
@@ -416,6 +500,7 @@ class Pipeline:
                 "spec_hash": spec_hash(st.spec),
                 "fingerprint": sig.fingerprints.get(name),
                 "captured": canonical(captured(st.fn, st.ignore)),
+                "code": st.code_hash,
                 "inputs": list(st.inputs),
                 "plan_key": plan_key,
             }

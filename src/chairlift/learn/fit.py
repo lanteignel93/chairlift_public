@@ -40,6 +40,7 @@ class FitSpec:
     selection: ClusterSelection | None = None
     keep_train: bool = True  # also return in-sample predictions on training rows
     cross_section: bool = True  # False: one row per date (a single instrument); checks and IC read across time
+    allow_constant: bool = False  # a rule may legitimately hold one position for a whole test year
 
 
 def in_sample_ic(frame: pl.DataFrame, pred: pl.Series, target: str, date: str, cross_section: bool = True) -> float:
@@ -91,7 +92,7 @@ def fit_walk_forward(
                 raise AssertionError("one row per date: a time series needs FitSpec(cross_section=False)")
             if not _num(sd["sd"].min()) > 0:
                 raise AssertionError(f"fold {f.test_year}: the prediction is constant on some test date")
-        elif not float(p_te.std()) > 0:
+        elif not s.allow_constant and not float(p_te.std()) > 0:
             raise AssertionError(f"fold {f.test_year}: the prediction is constant over the test period")
         info |= {
             "inputs": inputs,

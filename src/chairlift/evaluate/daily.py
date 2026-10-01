@@ -135,14 +135,18 @@ def ic_by_year(
 def ts_ic_by_year(frame: pl.DataFrame, pred: str = "pred", target: str = "y", date: str = "date") -> dict[str, Any]:
     """A time series' out-of-sample IC: the Spearman correlation of prediction and outcome over each year's rows."""
     f = frame.with_columns(year=pl.col(date).dt.year())
-    ic = f.group_by("year").agg(ic=pl.corr(pred, target, method="spearman"), n=pl.len()).sort("year")
-    v = ic["ic"].to_numpy()
+    ic = f.group_by("year").agg(ic=pl.corr(pred, target, method="spearman"), n=pl.len()).sort("year").fill_nan(None)
+    v = ic["ic"].drop_nulls().to_numpy()  # a constant prediction (a rule that never switched) has no rank correlation
     return {
-        "oos_ic_all": float(f.select(pl.corr(pred, target, method="spearman")).item()),
-        "oos_ic_mean": float(v.mean()),
-        "oos_ic_worst_year": float(v.min()),
-        "oos_ic_by_year": {int(y): float(c) for y, c in zip(ic["year"], v, strict=True)},
+        "oos_ic_all": _finite(f.select(pl.corr(pred, target, method="spearman")).item()),
+        "oos_ic_mean": float(v.mean()) if len(v) else None,
+        "oos_ic_worst_year": float(v.min()) if len(v) else None,
+        "oos_ic_by_year": {int(y): _finite(c) for y, c in zip(ic["year"], ic["ic"], strict=True)},
     }
+
+
+def _finite(v: object) -> float | None:
+    return float(v) if isinstance(v, int | float) and np.isfinite(v) else None
 
 
 def paired_sharpe_diff(x1: np.ndarray, x2: np.ndarray, s: DailyStatsSpec) -> dict[str, Any]:
@@ -166,5 +170,5 @@ def paired_sharpe_diff(x1: np.ndarray, x2: np.ndarray, s: DailyStatsSpec) -> dic
         "d_sharpe": _sharpe(b, s.periods) - _sharpe(a, s.periods),
         "d_sharpe_ci": [float(np.quantile(d, lo)), float(np.quantile(d, hi))],
         "p_d_le_0": float((d <= 0).mean()),
-        "corr": float(np.corrcoef(a, b)[0, 1]),
+        "corr": _finite(float(np.corrcoef(a, b)[0, 1])) if a.std() > 0 and b.std() > 0 else None,
     }

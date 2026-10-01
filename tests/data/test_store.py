@@ -114,3 +114,10 @@ def test_a_repeated_put_never_rewrites_the_object(tmp_path: Path):
     path = next((tmp_path / "objects").rglob("*.json"))
     mtime = path.stat().st_mtime_ns
     assert store.put({"x": 1}) == ref and path.stat().st_mtime_ns == mtime
+
+
+def test_a_non_json_output_names_the_offending_path(tmp_path: Path):
+    import pytest
+
+    with pytest.raises(TypeError, match=r"\$\.ls\.corr = nan"):
+        ArtifactStore(tmp_path).put({"ls": {"sharpe": 1.0, "corr": float("nan")}})

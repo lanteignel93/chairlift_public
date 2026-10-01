@@ -61,3 +61,19 @@ def test_lightgbm_deterministic_refits_are_bit_identical_on_many_threads():
     }
     s = LightGBMSpec(params=params, seeds=(0, 1), threads=8)
     np.testing.assert_array_equal(build(s).fit(X, y).predict(X), build(s).fit(X, y).predict(X))
+
+
+def test_rule_finds_the_regime_where_the_position_pays_and_falls_back_to_always_on():
+    from chairlift.learn.models import Rule, RuleSpec
+
+    rng = np.random.default_rng(3)
+    n = 4000
+    regime = rng.standard_normal(n)
+    noise = rng.standard_normal(n)
+    r = np.where(regime > 0.5, 0.05, -0.02) * 0.1 + 0.01 * rng.standard_normal(n)  # long pays only when regime > 0.5
+    m = Rule(RuleSpec(position=1.0)).fit(np.column_stack([noise, regime]), r)
+    d = m.describe()
+    assert d["input"] == 1 and d["on_when"] == "above" and 0.2 < d["threshold"] < 0.8
+    assert set(np.unique(m.predict(np.column_stack([noise, regime])))) == {0.0, 1.0}
+    flat = Rule(RuleSpec(position=1.0)).fit(np.column_stack([noise]), 0.001 + 0.01 * rng.standard_normal(n))
+    assert flat.describe()["input"] in (-1, 0)  # nothing to time: either always on or a noise split

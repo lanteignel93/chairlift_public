@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import math
 import os
 import tempfile
 from pathlib import Path
@@ -32,7 +33,11 @@ def _encode(obj: Any) -> tuple[bytes, str]:
     try:  # plain, sorted JSON: the value must read back as itself (tuples come back as lists)
         text = json.dumps(obj, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False)
     except (TypeError, ValueError) as exc:
-        raise TypeError(f"stage output of type {type(obj).__qualname__} is neither a DataFrame nor plain JSON") from exc
+        where = _first_bad(obj)
+        raise TypeError(
+            f"stage output of type {type(obj).__qualname__} is neither a DataFrame nor plain JSON"
+            + (f": {where}" if where else "")
+        ) from exc
     return text.encode(), "json"
 
 
@@ -76,3 +81,24 @@ class ArtifactStore:
         if kind not in _KINDS or len(digest) != 64:
             raise ValueError(f"not an artifact reference: {ref!r}")
         return kind, digest
+
+
+def _first_bad(obj: Any, path: str = "$") -> str | None:
+    """The first value that plain JSON cannot hold (NaN, infinity, a non-JSON type), as a path."""
+    if isinstance(obj, float) and not math.isfinite(obj):
+        return f"{path} = {obj}"
+    if isinstance(obj, dict):
+        for k, v in obj.items():  # pyright: ignore[reportUnknownVariableType]
+            hit = _first_bad(v, f"{path}.{k}")
+            if hit:
+                return hit
+        return None
+    if isinstance(obj, list | tuple):
+        for i, v in enumerate(obj):  # pyright: ignore[reportUnknownVariableType, reportUnknownArgumentType]
+            hit = _first_bad(v, f"{path}[{i}]")
+            if hit:
+                return hit
+        return None
+    if obj is None or isinstance(obj, str | int | float | bool):
+        return None
+    return f"{path} is a {type(obj).__qualname__}"

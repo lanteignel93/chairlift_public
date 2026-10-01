@@ -2,6 +2,9 @@
 
     RidgeSpec      closed-form ridge on standardised inputs, penalty alpha · n (alpha does not scale with sample size)
     LightGBMSpec   gradient boosting, several seeds averaged (needs the `ml` extra)
+    RuleSpec       a regime rule searched on the training rows: be in the position only when one input is above (or
+                   below) one of its training quantiles; the rule is chosen by the position's own Sharpe, not by a
+                   regression fit, and "always in" is one of the candidates
 
 An estimator is fitted on training rows only by the walk-forward fit; nothing here knows about folds or dates.
 """
@@ -37,7 +40,17 @@ class LightGBMSpec:
     deterministic: bool = True  # bit-identical refits on any thread count (LightGBM's deterministic + col-wise)
 
 
-ModelSpec = RidgeSpec | LightGBMSpec
+@spec(name="Rule", version=1)
+class RuleSpec:
+    """The target `y` handed to fit() must be the return the position earns (e.g. the next period's return)."""
+
+    position: float = -1.0  # the position when the rule is on (−1: short-or-flat; +1: long-or-flat)
+    quantiles: tuple[float, ...] = (0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9)
+    min_on: float = 0.25  # a rule must be on for at least this share of training rows
+    periods: int = 252
+
+
+ModelSpec = RidgeSpec | LightGBMSpec | RuleSpec
 
 
 class Ridge:
@@ -91,7 +104,58 @@ class LightGBM:
         return {"kind": "lightgbm", "seeds": list(self.spec.seeds), "gain_importance_mean": [float(v) for v in gain]}
 
 
+class Rule:
+    def __init__(self, s: RuleSpec) -> None:
+        self.spec = s
+
+    @staticmethod
+    def _sharpe(pnl: np.ndarray, periods: int) -> float:
+        sd = pnl.std(ddof=1)
+        return float(pnl.mean() / sd * np.sqrt(periods)) if sd > 0 else -np.inf
+
+    def fit(self, X: np.ndarray, y: np.ndarray) -> Rule:
+        s = self.spec
+        r = np.nan_to_num(y)
+        best = (self._sharpe(s.position * r, s.periods), -1, 0.0, 0)  # always on
+        self.candidates = 1
+        for j in range(X.shape[1]):
+            x = X[:, j]
+            for q in s.quantiles:
+                t = float(np.nanquantile(x, q))
+                for side in (1, -1):
+                    on = (x > t) if side == 1 else (x < t)
+                    if on.mean() < s.min_on:
+                        continue
+                    self.candidates += 1
+                    score = self._sharpe(np.where(on, s.position * r, 0.0), s.periods)
+                    if score > best[0]:
+                        best = (score, j, t, side)
+        self.train_sharpe, self.j, self.t, self.side = best
+        self.always_sharpe = self._sharpe(s.position * r, s.periods)
+        return self
+
+    def predict(self, X: np.ndarray) -> np.ndarray:
+        if self.j < 0:
+            return np.full(len(X), self.spec.position)
+        x = X[:, self.j]
+        on = (x > self.t) if self.side == 1 else (x < self.t)
+        return np.where(on, self.spec.position, 0.0)
+
+    def describe(self) -> dict[str, Any]:
+        return {
+            "kind": "rule",
+            "input": self.j,  # index into the fold's inputs; -1 = always on
+            "threshold": self.t,
+            "on_when": "above" if self.side == 1 else "below",
+            "train_sharpe": self.train_sharpe,
+            "always_on_train_sharpe": self.always_sharpe,
+            "candidates": self.candidates,
+        }
+
+
 def build(s: ModelSpec) -> Estimator:
+    if isinstance(s, RuleSpec):
+        return Rule(s)
     if isinstance(s, RidgeSpec):
         return Ridge(s.alpha, s.intercept)
     return LightGBM(s)

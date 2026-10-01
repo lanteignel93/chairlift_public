@@ -120,6 +120,7 @@ class Built:
     study: str = ""
     params: dict[str, Any] = field(default_factory=dict[str, Any])
     experiment: Experiment | None = None
+    headline: Any = None  # the study module's HEADLINE, if any (ledger)
 
     def targets(self, given: tuple[str, ...]) -> list[str] | None:
         if given:
@@ -189,7 +190,7 @@ def _build_ref(
     if not isinstance(pipe, Pipeline):
         raise click.UsageError(f"{study} returned {type(pipe).__qualname__}, not a Pipeline")
     pipe = pipe.rebase(root, store, data=cfg.data, cache=cache)  # data roots come from this machine's config
-    return Built(pipe, sname, root, store is not None, study, params)
+    return Built(pipe, sname, root, store is not None, study, params, headline=getattr(module, "HEADLINE", None))
 
 
 _RICH = {"hit": "dim", "ran": "green", "run": "yellow", "upstream": "cyan"}
@@ -263,11 +264,11 @@ def run(
     reason = reason or (b.experiment.reason if b.experiment else "")
     animate = (sys.stdout.isatty() if live is None else live) and not as_json
     if animate:
-        report = _run_live(b, b.targets(targets), reason, meta)
+        report = _run_live(b, b.targets(targets), reason, meta, b.headline)
         ran = report.ran()
         _console().print(f"{len(ran)} ran, {len(report.results) - len(ran)} reused · {b.name} · run {report.run_id}")
         return
-    report = b.pipe.run(b.targets(targets), reason=reason, meta=meta)
+    report = b.pipe.run(b.targets(targets), reason=reason, meta=meta, headline=b.headline)
     if as_json:
         click.echo(json.dumps([r.__dict__ for r in report.results.values()], indent=1))
         return
@@ -281,7 +282,9 @@ def run(
     con.print(f"\n{len(ran)} ran, {len(report.results) - len(ran)} reused · {b.name} · run {report.run_id} · {b.root}")
 
 
-def _run_live(b: Built, targets: list[str] | None, reason: str, meta: dict[str, Any]) -> RunReport:
+def _run_live(
+    b: Built, targets: list[str] | None, reason: str, meta: dict[str, Any], headline: Any = None
+) -> RunReport:
     """Run with the live view: events fold into a state the display re-renders ten times a second."""
     state = RunState()
 
@@ -289,7 +292,7 @@ def _run_live(b: Built, targets: list[str] | None, reason: str, meta: dict[str, 
         apply(state, e)
 
     with Live(console=_console(), refresh_per_second=10, get_renderable=lambda: render(state), transient=False):
-        return b.pipe.run(targets, reason=reason, meta=meta, listeners=[on_event])
+        return b.pipe.run(targets, reason=reason, meta=meta, listeners=[on_event], headline=headline)
 
 
 @main.command()
@@ -413,7 +416,7 @@ def sweep(
             row["signature"] = b.pipe.signature(tg).signature
         else:
             meta = b.meta(ctx) | {"sweep": {"id": sweep_id, "cell": i, "cells": len(cells), "values": row["values"]}}
-            report = b.pipe.run(tg, reason=reason or exp.reason, meta=meta)
+            report = b.pipe.run(tg, reason=reason or exp.reason, meta=meta, headline=b.headline)
             row |= {"signature": report.signature, "run_id": report.run_id, "ran": len(report.ran())}
             row["reused"] = len(report.results) - row["ran"]
         rows.append(row)
@@ -689,6 +692,84 @@ def compare(ctx: Ctx, run_a: str, run_b: str, root: Path | None, show_all: bool,
     con.print(t)
     differ = sum(1 for _, _, va, vb in rows if va != vb)
     con.print(f"\n{differ} of {len(rows)} rows differ" + ("" if show_all else " (equal rows hidden; --all shows them)"))
+
+
+def _study_root(ctx: Ctx, root: Path | None, study_name: str | None) -> Path:
+    if root is not None:
+        return root
+    if study_name is None:
+        raise click.UsageError("name the study with --study (or give --root)")
+    return ctx.config().config.paths.study_dir(study_name)
+
+
+@main.command()
+@root_opt
+@click.option("--study", "study_name", default=None, help="Study name.")
+@json_opt
+@click.pass_obj
+def ledger(ctx: Ctx, root: Path | None, study_name: str | None, as_json: bool) -> None:
+    """The study's trials (one per signature) and the deflated Sharpe of the best, given how many were tried."""
+    from chairlift.evaluate.deflated import deflated_sharpe
+    from chairlift.ledger.trials import Ledger
+
+    led = Ledger(_study_root(ctx, root, study_name) / "ledger.jsonl")
+    trials = led.trials()
+    if not trials:
+        raise click.UsageError(f"no trials recorded in {led.path}")
+    scored = [t for t in trials if t.get("headline")]
+    dsr = None
+    if scored:
+        h = [t["headline"] for t in scored]
+        dsr = deflated_sharpe([x["sharpe"] for x in h], n_obs=min(x["n_obs"] for x in h), periods=h[0]["periods"])
+        dsr["best_run"] = scored[dsr["best"]]["run_id"]
+    opened = led.holdout_opened()
+    if as_json:
+        click.echo(json.dumps({"trials": trials, "deflated": dsr, "holdout_open": opened}, indent=1, default=str))
+        return
+    t = _table("at", "signature", "sharpe", "params", "reason")
+    for tr in trials:
+        sh: dict[str, Any] = tr.get("headline") or {}
+        t.add_row(
+            tr["at"],
+            tr["signature"][:12],
+            f"{sh['sharpe']:+.3f}" if sh else "",
+            escape(json.dumps(tr["params"])),
+            escape(tr["reason"]),
+        )
+    con = _console()
+    con.print(t)
+    gate = "OPEN since " + opened["at"] if opened else "sealed"
+    con.print(f"\n{len(trials)} trial(s), {len(scored)} with a headline · holdout {gate}")
+    if dsr is not None:
+        con.print(
+            f"best Sharpe {dsr['best_sharpe']:+.3f} (run {dsr['best_run']}) · expected max of {dsr['n_trials']} null"
+            f" trials {dsr['expected_max_sharpe_null']:+.3f} · deflated Sharpe probability {dsr['dsr']:.3f}"
+            f" (vs zero {dsr['psr_vs_zero']:.3f})"
+        )
+
+
+@main.group()
+def holdout() -> None:
+    """The holdout gate: one look, recorded."""
+
+
+@holdout.command("open")
+@root_opt
+@click.option("--study", "study_name", default=None, help="Study name.")
+@click.option("--reason", required=True, help="Why now: what was frozen, and what will be read.")
+@click.pass_obj
+def holdout_open(ctx: Ctx, root: Path | None, study_name: str | None, reason: str) -> None:
+    """Open the study's holdout. Irreversible: the next runs read holdout rows, and the ledger keeps the moment."""
+    import getpass
+
+    from chairlift.ledger.trials import Ledger
+
+    led = Ledger(_study_root(ctx, root, study_name) / "ledger.jsonl")
+    try:
+        e = led.open_holdout(reason=reason, by=getpass.getuser())
+    except (PermissionError, ValueError) as exc:
+        raise click.UsageError(str(exc)) from exc
+    click.echo(f"holdout opened {e['at']} after {e['trials_before']} trial(s); every stage behind the gate re-keys")
 
 
 @main.group()
