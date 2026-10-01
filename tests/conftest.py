@@ -61,6 +61,7 @@ WITHIN = {
     "book": ["test_quantile", "test_timeseries"],
     "evaluate": ["test_daily", "test_deflated"],
     "ledger": ["test_trials", "test_holdout"],
+    "report": ["test_html"],
     "study": ["test_build"],
     "search": ["test_space", "test_select"],
     "verify": ["test_toy", "test_twins"],

@@ -87,6 +87,7 @@ class Systemd:
 @dataclass(frozen=True, kw_only=True)
 class Alerts:
     sinks: tuple[str, ...] = ("page", "jsonl")
+    stall_minutes: float = 60.0  # a running run with no event for this long is stalled
 
 
 @dataclass(frozen=True, kw_only=True)

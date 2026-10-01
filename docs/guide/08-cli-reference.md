@@ -11,6 +11,9 @@ Conventions shared by most commands:
 
 ## Commands
 
+- [`chairlift alerts`](#chairlift-alerts)
+- [`chairlift alerts check`](#chairlift-alerts-check)
+- [`chairlift alerts unit`](#chairlift-alerts-unit)
 - [`chairlift compare`](#chairlift-compare)
 - [`chairlift config`](#chairlift-config)
 - [`chairlift config check`](#chairlift-config-check)
@@ -21,6 +24,7 @@ Conventions shared by most commands:
 - [`chairlift ledger`](#chairlift-ledger)
 - [`chairlift log`](#chairlift-log)
 - [`chairlift plan`](#chairlift-plan)
+- [`chairlift report`](#chairlift-report)
 - [`chairlift rerun`](#chairlift-rerun)
 - [`chairlift run`](#chairlift-run)
 - [`chairlift runs`](#chairlift-runs)
@@ -29,7 +33,10 @@ Conventions shared by most commands:
 - [`chairlift show`](#chairlift-show)
 - [`chairlift signature`](#chairlift-signature)
 - [`chairlift status`](#chairlift-status)
+- [`chairlift submit`](#chairlift-submit)
 - [`chairlift sweep`](#chairlift-sweep)
+- [`chairlift systemd`](#chairlift-systemd)
+- [`chairlift systemd install`](#chairlift-systemd-install)
 - [`chairlift watch`](#chairlift-watch)
 
 <a id="chairlift"></a>
@@ -46,6 +53,36 @@ chairlift: a research pipeline in which the protocol is code.
 |---|---|
 | `--version` | Show the version and exit. |
 | `--profile TEXT` | Site configuration profile (overrides CHAIRLIFT_PROFILE and the host map). |
+
+<a id="chairlift-alerts"></a>
+
+## `chairlift alerts`
+
+```
+chairlift alerts [OPTIONS] COMMAND [ARGS]...
+```
+
+Alerts: failed, died and stalled runs, delivered once to the configured sinks.
+
+<a id="chairlift-alerts-check"></a>
+
+## `chairlift alerts check`
+
+```
+chairlift alerts check [OPTIONS]
+```
+
+Judge every study's latest run; deliver new alerts. Exit 1 when anything was delivered.
+
+<a id="chairlift-alerts-unit"></a>
+
+## `chairlift alerts unit`
+
+```
+chairlift alerts unit [OPTIONS] UNIT
+```
+
+Called by systemd OnFailure: report a failed chairlift unit.
 
 <a id="chairlift-compare"></a>
 
@@ -190,6 +227,22 @@ Show what `run` would do, without running anything.
 | `--target TEXT` | Run only these stages and their ancestors. |
 | `--json` | Machine-readable output. |
 
+<a id="chairlift-report"></a>
+
+## `chairlift report`
+
+```
+chairlift report [OPTIONS] [RUN]
+```
+
+Write a self-contained HTML report of a run (default: the newest), or the index of all studies.
+
+| option | meaning |
+|---|---|
+| `--root PATH` | A self-contained run directory (own store). Default: &lt;paths.home&gt;/studies/&lt;name&gt;, shared store. |
+| `--study TEXT` | Look for RUN in this study only. |
+| `--index` | Write the index of every study's latest run instead. |
+
 <a id="chairlift-rerun"></a>
 
 ## `chairlift rerun`
@@ -328,6 +381,24 @@ The latest run's state. Exit 0 ok, 1 failed or died, 2 still running: for script
 | `--run TEXT` | A run id prefix (default: the newest run). |
 | `--json` | Machine-readable output. |
 
+<a id="chairlift-submit"></a>
+
+## `chairlift submit`
+
+```
+chairlift submit [OPTIONS] STUDY
+```
+
+Run a study as a transient systemd user unit: a progress-tied watchdog, and an OnFailure alert.
+
+| option | meaning |
+|---|---|
+| `--set NAME=VALUE` | Factory parameter (repeatable). |
+| `--target TEXT` | Run only these stages and their ancestors. |
+| `--reason TEXT` | Why this run. |
+| `--watchdog TEXT` | systemd WatchdogSec (default: [systemd] watchdog_default). |
+| `--dry-run` | Print the systemd-run command; start nothing. |
+
 <a id="chairlift-sweep"></a>
 
 ## `chairlift sweep`
@@ -347,6 +418,30 @@ Run every cell of an experiment's [sweep], in order, sharing one store: unchange
 | `--reason TEXT` | Why this sweep (default: the file's reason). |
 | `--dry-run` | List the cells and their signatures; run nothing. |
 | `--json` | Machine-readable output. |
+
+<a id="chairlift-systemd"></a>
+
+## `chairlift systemd`
+
+```
+chairlift systemd [OPTIONS] COMMAND [ARGS]...
+```
+
+systemd integration.
+
+<a id="chairlift-systemd-install"></a>
+
+## `chairlift systemd install`
+
+```
+chairlift systemd install [OPTIONS]
+```
+
+Install the OnFailure template unit chairlift-alert@.service (runs `chairlift alerts unit %i`).
+
+| option | meaning |
+|---|---|
+| `--dir PATH` | Default ~/.config/systemd/user. |
 
 <a id="chairlift-watch"></a>
 

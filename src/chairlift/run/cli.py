@@ -904,6 +904,131 @@ def holdout_open(ctx: Ctx, root: Path | None, study_name: str | None, reason: st
     click.echo(f"holdout opened {e['at']} after {e['trials_before']} trial(s); every stage behind the gate re-keys")
 
 
+@main.command()
+@click.argument("run", required=False)
+@root_opt
+@click.option("--study", "study_name", default=None, help="Look for RUN in this study only.")
+@click.option("--index", "index", is_flag=True, help="Write the index of every study's latest run instead.")
+@click.pass_obj
+def report(ctx: Ctx, run: str | None, root: Path | None, study_name: str | None, index: bool) -> None:
+    """Write a self-contained HTML report of a run (default: the newest), or the index of all studies."""
+    from chairlift.report.html import index_page, run_report
+
+    paths = ctx.config().config.paths
+    if index:
+        out = paths.reports_dir() / "index.html"
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(index_page(paths.studies_dir()))
+        click.echo(str(out))
+        return
+    rec_path, rec = _latest(ctx, root, study_name, run)
+    page = run_report(rec_path, rec_path.parent.parent / "ledger.jsonl")
+    out = rec_path.parent.parent / "reports" / f"{rec['run_id']}.html"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(page)
+    click.echo(str(out))
+
+
+@main.command()
+@click.argument("study")
+@set_opt
+@target_opt
+@click.option("--reason", default="", help="Why this run.")
+@click.option("--watchdog", default=None, help="systemd WatchdogSec (default: [systemd] watchdog_default).")
+@click.option("--dry-run", is_flag=True, help="Print the systemd-run command; start nothing.")
+@click.pass_obj
+def submit(
+    ctx: Ctx,
+    study: str,
+    sets: tuple[str, ...],
+    targets: tuple[str, ...],
+    reason: str,
+    watchdog: str | None,
+    dry_run: bool,
+) -> None:
+    """Run a study as a transient systemd user unit: a progress-tied watchdog, and an OnFailure alert."""
+    import subprocess
+
+    from chairlift.run.systemd import parse_duration, quote, submit_command, unit_name
+
+    cfg = ctx.config().config
+    wd = watchdog or cfg.systemd.watchdog_default
+    parse_duration(wd)  # refuse a bad spelling before systemd does
+    name = (
+        Path(study).stem if study.endswith(".toml") else study.rpartition(":")[0].rsplit("/", 1)[-1].removesuffix(".py")
+    )
+    args = [study, *(a for s_ in sets for a in ("--set", s_)), *(a for t in targets for a in ("--target", t))]
+    if reason:
+        args += ["--reason", reason]
+    env = {
+        k: v for k, v in os.environ.items() if k.startswith("CHAIRLIFT_") or k in ("POLARS_MAX_THREADS", "UV_LINK_MODE")
+    }
+    exe = sys.argv[0] if sys.argv and sys.argv[0].endswith("chairlift") else "chairlift"
+    cmd = submit_command(exe, args, unit_name(name), wd, cfg.systemd.on_failure, Path.cwd(), env)
+    if dry_run:
+        click.echo(quote(cmd))
+        return
+    subprocess.run(cmd, check=True)
+    unit = cmd[2].removeprefix("--unit=")
+    click.echo(f"submitted {unit} · follow: chairlift watch · journalctl --user -u {unit} -f")
+
+
+@main.group()
+def systemd() -> None:
+    """systemd integration."""
+
+
+@systemd.command("install")
+@click.option(
+    "--dir", "unit_dir", type=click.Path(path_type=Path), default=None, help="Default ~/.config/systemd/user."
+)
+def systemd_install(unit_dir: Path | None) -> None:
+    """Install the OnFailure template unit chairlift-alert@.service (runs `chairlift alerts unit %i`)."""
+    from chairlift.run.systemd import ALERT_TEMPLATE
+
+    d = unit_dir or Path.home() / ".config" / "systemd" / "user"
+    d.mkdir(parents=True, exist_ok=True)
+    exe = sys.argv[0] if sys.argv and sys.argv[0].endswith("chairlift") else "chairlift"
+    (d / "chairlift-alert@.service").write_text(ALERT_TEMPLATE.format(exe=exe))
+    click.echo(f"wrote {d / 'chairlift-alert@.service'} · run: systemctl --user daemon-reload")
+
+
+@main.group()
+def alerts() -> None:
+    """Alerts: failed, died and stalled runs, delivered once to the configured sinks."""
+
+
+@alerts.command("check")
+@click.pass_obj
+def alerts_check(ctx: Ctx) -> None:
+    """Judge every study's latest run; deliver new alerts. Exit 1 when anything was delivered."""
+    from chairlift.core.secrets import load_secrets
+    from chairlift.run.alerts import Delivery, judge
+
+    cfg = ctx.config().config
+    found = judge(cfg.paths.studies_dir(), cfg.alerts.stall_minutes)
+    sent = Delivery(cfg.paths.home, cfg.alerts.sinks, load_secrets()).deliver(found)
+    for a in sent:
+        click.echo(f"{a['rule']:8} {a['study']} {a['run_id']} {a.get('detail', '')}")
+    click.echo(f"{len(found)} alert(s), {len(sent)} new")
+    if sent:
+        raise SystemExit(1)
+
+
+@alerts.command("unit")
+@click.argument("unit")
+@click.pass_obj
+def alerts_unit(ctx: Ctx, unit: str) -> None:
+    """Called by systemd OnFailure: report a failed chairlift unit."""
+    from chairlift.core.secrets import load_secrets
+    from chairlift.run.alerts import Delivery
+
+    cfg = ctx.config().config
+    a = {"rule": "unit", "study": unit, "run_id": unit, "detail": f"systemd unit {unit} failed (watchdog or exit)"}
+    Delivery(cfg.paths.home, cfg.alerts.sinks, load_secrets()).deliver([a])
+    click.echo(f"alerted: {unit}")
+
+
 @main.group()
 def config() -> None:
     """Site configuration: show, check, or start a file."""

@@ -425,7 +425,16 @@ class Pipeline:
         report = RunReport(run_id=self._new_run_id(started, sig.signature), signature=sig.signature)
         record = self._record(report, sig, started, targets, reason, meta)
         self._write_record(record)
-        log = EventLog(self.root / "runs" / f"{report.run_id}.events.jsonl", report.run_id, list(listeners))
+        last_event = [time.monotonic()]
+
+        def _progress(_e: dict[str, Any]) -> None:
+            last_event[0] = time.monotonic()
+
+        log = EventLog(self.root / "runs" / f"{report.run_id}.events.jsonl", report.run_id, [*listeners, _progress])
+        from chairlift.run.systemd import Heartbeat, watchdog_interval
+
+        wd = watchdog_interval()
+        heartbeat = Heartbeat(wd, lambda: last_event[0]).start() if wd else None  # under systemd with WatchdogSec
         study = (meta or {}).get("name") or (meta or {}).get("study")
         log.emit("run_started", study=study, signature=sig.signature, stages=list(sig.plan_keys), reason=reason)
         refs: dict[str, str] = {}
@@ -456,6 +465,8 @@ class Pipeline:
                 },
             }
             self._write_record(record)
+            if heartbeat is not None:
+                heartbeat.stop()
         return report
 
     def _record_trial(
