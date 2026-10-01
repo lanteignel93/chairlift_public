@@ -24,5 +24,7 @@ versatility on several different strategies once the setup is settled, and impro
 
 ## Status
 
-Milestone 0 in progress. Landed: spec identity (`core/spec.py`), code identity (`core/identity.py`), the artifact
-store and manifest (`data/`), and the DAG runner (`run/dag.py`), with tests and `debug_walkthroughs/wt_manifest.py`.
+Milestone 0 in progress. Landed: spec identity, code identity, the content store and manifest, the DAG runner with
+plan keys and run signatures, run records, layered site configuration with provenance and secrets, the event stream
+and the animated live view, and the CLI (`run`, `plan`, `show`, `log`, `signature`, `runs`, `watch`, `status`,
+`config`). 129 tests mirroring `src/`, two walkthroughs.

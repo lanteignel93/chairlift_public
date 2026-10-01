@@ -1,6 +1,6 @@
 # M0 Config: machine-independent settings, experiment files, and run identity
 
-**Status:** actionable
+**Status:** in-flight (steps 1–3 landed 2026-09-30: 4119ab0)
 **Prepared:** 2026-09-30
 **Owner:** Laurent Lanteigne
 **Buy-in:** Laurent — asked for centralized configs, no machine-specific paths, hashed inputs per run (2026-09-30)
@@ -229,4 +229,8 @@ automated-search plan, as a `[search]` section of the same experiment file).
 
 ## Closeout / as-built
 
-*Fill at completion.*
+*Partial, 2026-09-30.* Steps 1–3 landed with one change from the plan: `paths` is one `home` directory with
+`store/`, `studies/<name>/`, `reports/`, `cache/` under it (Laurent: all data in one place, studies named from config,
+sharing work), instead of four independent roots. Each subpath can still be moved alone. `config show / check / init`
+(step 7's commands) landed early because they were needed to debug the layering. Remaining: data references and
+fingerprints (4), experiment files and `sweep` (5), environment hash, `rerun`, `compare` (6), `wt_config.py` (7).

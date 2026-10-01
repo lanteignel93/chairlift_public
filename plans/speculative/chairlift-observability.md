@@ -1,6 +1,6 @@
 # chairlift observability: eyes on a run while it builds, and after
 
-**Status:** speculative
+**Status:** speculative — E1 (event stream) and E2 (live view, watch, status) landed 2026-09-30 (d6a49af)
 **Prepared:** 2026-09-30
 **Owner:** Laurent Lanteigne
 **Buy-in:** <fill when promoting to actionable>
