@@ -15,6 +15,12 @@ holdout the loader refuses to read, and a manifest that makes every rebuild repr
 |---|---|---|
 | slalom | cross-sectional: ~60–790 single names a day, hedged 1m straddle P&L per unit vega | golden reference: milestone 1 must reproduce its dev numbers card and its holdout verdict |
 | VXX | time series: one instrument, position sizing | modularity test: must run with zero core edits |
+| Equity L/S | cross-section of index members, monthly, forward 21d return | fundamentals with release lags, factor neutralization, incremental mode against known factors |
+| SPY timing | one instrument, daily, 1-day excess return | macro inputs with release lags, overlapping horizons (HAC), incremental mode against an incumbent |
+| Intraday futures (later) | event-time, sessions | session boundaries, row volume, the full feature-search funnel |
+
+Each study first runs on a synthetic twin with a planted signal (Laurent, 2026-09-30: test the pipeline's
+versatility on several different strategies once the setup is settled, and improve it from what breaks).
 
 ## Status
 
