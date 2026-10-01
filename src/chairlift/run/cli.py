@@ -76,7 +76,9 @@ _RICH = {"hit": "dim", "ran": "green", "run": "yellow", "upstream": "cyan"}
 
 def _console() -> Console:
     # sys.stdout read at call time, so CliRunner captures it; rich colours only when it is a terminal
-    return Console(file=sys.stdout, highlight=False, soft_wrap=False)
+    # piped or captured output gets a wide fixed width so columns are never truncated mid-value
+    width = None if sys.stdout.isatty() else 240
+    return Console(file=sys.stdout, highlight=False, soft_wrap=False, width=width)
 
 
 def _table(*columns: str) -> Table:
@@ -111,7 +113,7 @@ def main() -> None:
 def run(study: str, root: Path, sets: tuple[str, ...], targets: tuple[str, ...], reason: str, as_json: bool) -> None:
     """Run a study's pipeline; reuse every stage whose inputs, spec and version are unchanged."""
     pipe = _build(study, root, sets)
-    report = pipe.run(list(targets) or None, reason=reason)
+    report = pipe.run(list(targets) or None, reason=reason, meta={"study": study, "params": _parse_sets(sets)})
     if as_json:
         click.echo(json.dumps([r.__dict__ for r in report.results.values()], indent=1))
         return
@@ -122,7 +124,7 @@ def run(study: str, root: Path, sets: tuple[str, ...], targets: tuple[str, ...],
     con = _console()
     con.print(t)
     ran = report.ran()
-    con.print(f"\n{len(ran)} ran, {len(report.results) - len(ran)} reused · root {root}")
+    con.print(f"\n{len(ran)} ran, {len(report.results) - len(ran)} reused · run {report.run_id} · root {root}")
 
 
 @main.command()
@@ -187,3 +189,63 @@ def log(root: Path, stage: str | None, last: int, as_json: bool) -> None:
     con = _console()
     con.print(t)
     con.print(f"\n{len(Manifest(path).records())} keys in the manifest")
+
+
+@main.command()
+@study_arg
+@root_opt
+@set_opt
+@target_opt
+@json_opt
+def signature(study: str, root: Path, sets: tuple[str, ...], targets: tuple[str, ...], as_json: bool) -> None:
+    """Print the run signature (inputs-only identity) and each stage's plan key, without running."""
+    sig = _build(study, root, sets).signature(list(targets) or None)
+    if as_json:
+        click.echo(json.dumps({"signature": sig.signature, "plan_keys": sig.plan_keys}, indent=1))
+        return
+    t = _table("stage", "plan key")
+    for name, k in sig.plan_keys.items():
+        t.add_row(name, k[:16])
+    con = _console()
+    con.print(t)
+    con.print(f"\nsignature {sig.signature}")
+
+
+def _records(root: Path) -> list[dict[str, Any]]:
+    runs = root / "runs"
+    if not runs.exists():
+        raise click.UsageError(f"no runs recorded under {runs}")
+    return [json.loads(p.read_text()) for p in sorted(runs.glob("*.json"))]
+
+
+@main.group(invoke_without_command=True)
+@root_opt
+@click.pass_context
+def runs(ctx: click.Context, root: Path) -> None:
+    """List recorded runs (newest last); `runs show RUN` prints one record."""
+    ctx.obj = root
+    if ctx.invoked_subcommand is not None:
+        return
+    t = _table("run_id", "status", "signature", "study", "params", "reason")
+    for r in _records(root):
+        meta = r.get("meta", {})
+        t.add_row(
+            r["run_id"],
+            r["status"],
+            r["signature"][:12],
+            str(meta.get("study", "")),
+            json.dumps(meta.get("params", {})),
+            r.get("reason", ""),
+        )
+    _console().print(t)
+
+
+@runs.command("show")
+@click.argument("run")
+@click.pass_obj
+def runs_show(root: Path, run: str) -> None:
+    """Print a run record by run id or signature prefix (the newest match)."""
+    matches = [r for r in _records(root) if r["run_id"].startswith(run) or r["signature"].startswith(run)]
+    if not matches:
+        raise click.BadParameter(f"no run or signature starting with {run!r}", param_hint="RUN")
+    click.echo(json.dumps(matches[-1], indent=1, sort_keys=True))

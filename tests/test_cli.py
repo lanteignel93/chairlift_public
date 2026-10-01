@@ -67,3 +67,13 @@ def test_bad_references_are_usage_errors(tmp_path):
     assert runner.invoke(main, ["run", TOY, "--set", "unknown_param=1", "--root", str(tmp_path)]).exit_code == 2
     assert runner.invoke(main, ["show", TOY, "nostage", "--root", str(tmp_path)]).exit_code == 2
     assert runner.invoke(main, ["log", "--root", str(tmp_path / "empty")]).exit_code == 2
+
+
+def test_signature_runs_and_show(tmp_path):
+    root = str(tmp_path / "toy")
+    sig = json.loads(invoke("signature", TOY, "--root", root, "--json").output)["signature"]
+    invoke("run", TOY, "--root", root, "--reason", "first")
+    listed = invoke("runs", "--root", root)
+    assert listed.exit_code == 0 and "first" in listed.output
+    rec = json.loads(invoke("runs", "--root", root, "show", sig[:10]).output)
+    assert rec["signature"] == sig and rec["meta"]["study"] == TOY
