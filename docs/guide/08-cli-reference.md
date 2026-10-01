@@ -154,9 +154,9 @@ chairlift rerun [OPTIONS] RUN
 
 Rebuild a recorded run from its record alone, from scratch, and check every output is byte-identical.
 
-    Exit 0 when every stage reproduces; 1 when an output differs or the signature does (the study code, the
-    parameters or the data changed since). A different environment hash is a warning: identical bytes are then
-    likely but not promised.
+Exit 0 when every stage reproduces; 1 when an output differs or the signature does (the study code, the
+parameters or the data changed since). A different environment hash is a warning: identical bytes are then
+likely but not promised.
 
 | option | meaning |
 |---|---|

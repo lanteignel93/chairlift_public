@@ -5,6 +5,7 @@ uv run python scripts/gen_cli_reference.py          # rewrite the page
 
 from __future__ import annotations
 
+import inspect
 from pathlib import Path
 
 import click
@@ -66,7 +67,7 @@ def render() -> str:
         parts.append(f'<a id="{path.replace(" ", "-")}"></a>\n\n## `{path}`\n')
         parts.append(f"```\n{path} {usage}\n```\n")
         if cmd.help:
-            parts.append(_md(click.unstyle(cmd.help).strip()) + "\n")
+            parts.append(_md(inspect.cleandoc(click.unstyle(cmd.help))) + "\n")  # 3.13+ dedents at compile time
         rows = _option_rows(cmd, ctx)
         if rows:
             parts.append("| option | meaning |\n|---|---|")
