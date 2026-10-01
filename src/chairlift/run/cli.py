@@ -332,10 +332,11 @@ def show(
     ctx: Ctx, study: str, stage: str, root: Path | None, name: str | None, sets: tuple[str, ...], rows: int
 ) -> None:
     """Print a stage's stored output (building it and its ancestors first if needed)."""
-    pipe = _build(ctx, study, root, sets, name).pipe
+    b = _build(ctx, study, root, sets, name)
+    pipe = b.pipe
     if stage not in pipe.stages:
         raise click.BadParameter(f"unknown stage {stage!r}; stages: {', '.join(pipe.order)}", param_hint="STAGE")
-    report = pipe.run([stage])
+    report = pipe.run([stage], reason=f"show {stage}", meta=b.meta(ctx))
     out = pipe.load(stage, report)
     if isinstance(out, pl.DataFrame):
         with pl.Config(tbl_rows=rows, tbl_cols=-1):

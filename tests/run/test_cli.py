@@ -252,3 +252,10 @@ def test_compare_names_what_differs_between_two_runs(tmp_path):
     assert not any(s == "env" for s, _ in differ)  # same process, same environment
     text = invoke("compare", a, b, "--root", str(root)).output
     assert "window" in text and "rows differ" in text
+
+
+def test_show_records_the_study_so_status_and_runs_can_name_it(tmp_path):
+    root = tmp_path / "toy"
+    invoke("show", TOY, "report", "--root", str(root))
+    rec = _records(root)[-1]
+    assert rec["meta"]["name"] == "toy" and rec["reason"] == "show report" and rec["targets"] == ["report"]

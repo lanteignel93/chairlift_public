@@ -368,7 +368,7 @@ STARTER = """\
 # cache   = "..."                    #                          (default <home>/cache)
 
 [data]
-# vendor = "/mnt/data/vendor"        # aliases: studies read DataRef("vendor", ...), never a path
+# vendor = "/mnt/data/vendor"        # aliases: studies read DataRef(alias="vendor", ...), never a path
 
 [compute]
 # workers = 8
