@@ -10,7 +10,7 @@ jobs:
   quality:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v6
       - run: uv run ruff check .
       - run: uv run ruff format --check .
@@ -21,7 +21,7 @@ jobs:
     # Astral's type checker (beta) is clean as of 0.1.2 and blocks like basedpyright, so new errors cannot accumulate
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v6
       - run: uv run ty check
 
@@ -31,7 +31,7 @@ jobs:
       matrix:
         python-version: ["3.12", "3.13", "3.14"]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v6
       - run: uv python install ${{ matrix.python-version }}
       - run: uv sync --extra ml --python ${{ matrix.python-version }}
@@ -41,7 +41,7 @@ jobs:
     # the wheel alone, in a clean environment: what a user installing chairlift gets
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v6
       - run: uv build --out-dir dist
       - run: uv venv /tmp/wheel -p 3.12 && uv pip install --python /tmp/wheel/bin/python dist/*.whl
