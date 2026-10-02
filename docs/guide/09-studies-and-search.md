@@ -113,6 +113,14 @@ chairlift search examples/experiments/equity-search.toml --dry-run    # the cand
 chairlift search examples/experiments/equity-search.toml
 ```
 
+Options:
+- `--jobs N` runs N candidates at once, in spawned processes. The machine's fold workers are split between them,
+  and appends to the shared manifest, ledger and stat cache are locked.
+- `[search.complexity]`, a table of parameter → `{value = cost}`, is a prior. Walk-forward selection ranks
+  candidates by past Sharpe minus their cost, so a more complex candidate has to beat the simpler ones by its cost.
+  Example: `model = { gbm = 0.2, ensemble = 0.1 }`.
+- `[search] objective` judges another book than the study's ledger headline.
+
 Every candidate is an ordinary run, charged to the ledger. The search is then judged in three ways:
 - **Deflated Sharpe probability of the best candidate.**
 - **Walk-forward selection:** each year, the candidate with the best record up to then is chosen, and the chosen
@@ -158,3 +166,11 @@ chairlift alerts check                         # failed / died / stalled runs, d
 - **Stalls:** a run is stalled after `[alerts] stall_minutes` without an event.
 - **Timers:** put `chairlift alerts check` on a systemd timer or cron; its exit code says whether anything new
   happened.
+
+## Factor attribution: does a book add anything?
+
+`chairlift.evaluate.attribution.factor_attribution(series, factors, periods, lags)` regresses a book's returns on
+factor books, with Newey-West errors. It reports α per period and annualised, α's t-statistic, the betas, R², and
+the information ratio of the unexplained part. The equity client builds its four factor books (momentum, value,
+size, low volatility) as single-feature decile books and runs the attribution as an extra stage.
+

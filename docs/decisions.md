@@ -248,3 +248,40 @@ once.
   SPY null twin does not beat buy-and-hold.
 - **Store** errors name the non-JSON path; NaN correlations become null.
 
+## 2026-10-02 — Study, search v2, observability; four clients run; the VXX holdout look
+
+- **Study** (`study/build.py`): a declared study builds its DAG.
+  - Pieces: sources, folds, `fit_*` per model, `ens_*`, books, paths, `eval_*`, `report`, plus extra stages.
+  - Factories may return a Study and take keyword-only knobs, so parameter validation stays typed.
+  - The four clients (slalom, VXX, equity L/S, SPY timing) and the two twin examples are declared this way.
+  - slalom's candidate stayed bit-identical through the port.
+- **Determinism and identity, end to end.** `chairlift rerun` reproduces all 18 slalom stages bit for bit. Bugs found
+  on the way, all silent and all fixed:
+  1. the code digest depended on set order (PYTHONHASHSEED), through dataclass-generated methods that share one code
+     object
+  2. the code digest did not follow user code captured in closures
+  3. parallel-fold frames encoded to different parquet bytes; the store now rechunks
+  4. the slalom engine broke an expiry tie by row order; that is a client fix, and its source tree is now part of
+     the paths fingerprint
+- **Parallel folds** (`compute.workers`, spawned) and **parallel search candidates** (`--jobs`). Appends to shared
+  JSON-lines files take an fcntl lock (`data/locking.append_line`).
+- **Search v2:** `[search.complexity]` priors in walk-forward selection; an objective override; structural knobs
+  (feature family, model) as study parameters.
+  - The twins validate the judgment: planted signal DSR 1.00 / PBO 0.01; null DSR 0.45 / PBO 0.56.
+- **Observability:**
+  - `chairlift report`: an HTML page per run, and an index
+  - `chairlift submit`: a systemd transient unit; the watchdog heartbeat is sent only while events advance;
+    OnFailure goes to `chairlift alerts unit`
+  - `chairlift alerts check`: failed, died and stalled runs, delivered once to jsonl / stdout / webhook
+- **Factor attribution** (`evaluate/attribution.py`): α after factor books, with Newey-West errors.
+- **The clients' results:**
+  - **VXX:** candidate A was registered, then the holdout opened once (2026-10-02, after 17 trials). FAIL (G2, G3):
+    0.24 vs 0.50 for always short. The contango switch sits out V-shaped snap-backs.
+  - **Equity L/S:** the S&P 500 point-in-time, SEC fundamentals as filed, CIKs mapped by ticker then by name (737 of
+    876 members). Dev has no edge (−0.51; α t −1.2). A structural search finds nothing (DSR 0.39, PBO 0.42). The
+    release-lag leak test moves nothing because fundamentals carry no one-month IC here.
+  - **SPY timing:** macro with publication lags, long-or-flat. 0.95 against buy-and-hold's 0.90: no edge.
+  - Holdouts for equity and SPY stay sealed; no candidate qualified.
+- **Names:** the twin examples are `equity_twin` / `spy_twin`, so they do not share directories or ledgers with the
+  real clients.
+

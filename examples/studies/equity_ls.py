@@ -26,7 +26,7 @@ from chairlift.schedule.walkforward import WalkForward
 from chairlift.study.build import CrossSectionBook, Ensemble, FeatureSet, Model, Source, Study
 from chairlift.verify.twins import CrossSectionTwin, cross_section_twin
 
-STUDY_NAME = "equity_ls"
+STUDY_NAME = "equity_twin"
 HEADLINE = {
     "stage": "eval_ensemble",
     "sharpe": "ls.sharpe",

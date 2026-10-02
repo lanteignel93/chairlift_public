@@ -118,6 +118,22 @@ needs work. It did need work. Three additions, then the answer:
   it had no way to know.
 - **What decides it:** the sealed 2024+ holdout, one look, for a registered candidate.
 
+### The one holdout look (2026-10-02)
+
+Candidate A (short in futures contango, volatility-targeted) was registered with three gates
+(`vxx_trade/chairlift_client/REGISTRATION.md`), then the 2024+ holdout was opened once through the ledger.
+
+![holdout](figures/vxx_holdout.png)
+
+| holdout 2024-01 → 2026-08 | Sharpe [CI99] | max DD |
+|---|---|---|
+| candidate A | 0.24 [−1.64, 2.14] | −0.867 |
+| always short | 0.50 [−0.73, 2.05] | −0.864 |
+
+**FAIL**: G1 passes, G2 fails (Δ −0.26), G3 fails. The contango switch goes flat once the curve inverts. The dev
+period's spikes were drawn out, so going flat avoided losses; the holdout's spikes (August 2024, April 2025) were V-shaped,
+so it missed the snap-backs. Nothing is refit from the look.
+
 ### One command, six experiments
 
 ```bash
@@ -137,7 +153,39 @@ cell  horizon  cost_bp  signature     ran  reused
 3     5        5.0      3e688a5703ce  0    7       ← same signature as the dev run: nothing to do
 ```
 
-## 3. Reproduce and compare
+## 3. Equity long/short on real data: an honest null
+
+S&P 500 members month by month (point-in-time), fundamentals from SEC filings known only once filed, ridge and
+LightGBM, a decile book, and the incremental test against four factor books.
+
+![equity](figures/equity_ls.png)
+
+- **Dev 2015–2019:** the ensemble's L/S Sharpe is −0.51 [−1.90, 0.68]. Its alpha after the factors is −3.2%/yr
+  (t −1.2).
+- **Structural search** (family × model × q, a complexity prior, 18 candidates, `--jobs 6`, 2 min 16 s): the best
+  scores 0.35, below the 0.49 expected from 18 nulls. DSR 0.39, PBO 0.42, walk-forward selection 0.04.
+- **The release-lag leak test** moves nothing: in this universe, fundamentals carry no one-month IC.
+
+## 4. SPY timing: nothing beats holding
+
+![spy](figures/spy_timing.png)
+
+Macro inputs with publication lags (yields, credit spreads, unemployment from the 10th of the next month), VIX and
+trend, long-or-flat. On 2014–2019, ridge and the ensemble reach 0.95 against buy-and-hold's 0.90 (Δ +0.05, CI ±0.5).
+That is no edge.
+
+## 5. The search judges itself
+
+The same 16-candidate search on the twin with a planted signal and on the null twin:
+
+![twin search](figures/twin_search.png)
+
+| | best | expected max of 16 nulls | DSR | walk-forward selection | PBO |
+|---|---|---|---|---|---|
+| planted signal | 2.12 | 0.79 | 1.00 | 1.24 | 0.01 |
+| null twin | 0.34 | 0.39 | 0.45 | −0.12 | 0.56 |
+
+## 6. Reproduce and compare
 
 `chairlift rerun RUN` rebuilds a run from its record alone in a fresh directory and byte-compares every output
 ([cli/vxx_rerun.txt](cli/vxx_rerun.txt)):

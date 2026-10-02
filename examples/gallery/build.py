@@ -284,13 +284,144 @@ def _vxx_regime(store: ArtifactStore, recs: list[dict[str, Any]]) -> dict[str, A
     return {name: {k: st[k] for k in keep} for name, st in lines.items()}
 
 
+def _searches(home: Path, study: str) -> list[dict[str, Any]]:
+    d = home / "studies" / study / "searches"
+    return [json.loads(f.read_text()) for f in sorted(d.glob("*.json"))] if d.exists() else []
+
+
+def vxx_holdout(store: ArtifactStore, home: Path) -> dict[str, Any]:
+    """Candidate A and always short, 2017 → 2026, with the one holdout look shaded."""
+    rec = latest_with(records(home, "vxx"), ["holdout_look", "eval_baselines"])
+    look = load(store, rec, "holdout_look")
+    if look.get("sealed"):
+        return {"sealed": True}
+    E = load(store, rec, "eval_baselines")
+    fig, ax = plt.subplots(figsize=(11, 3.8))
+    for name, c in (("always_short", VXX["always_short"]), ("candidate_A", "#2e9e6a")):
+        d = pl.DataFrame(E[name]["daily"]).with_columns(pl.col("date").str.to_date())
+        ax.plot(d["date"], np.cumsum(d["pnl"].to_numpy()), color=c, lw=1.2, label=name.replace("_", " "))
+    import datetime as _dt
+
+    ax.axvspan(_dt.date(2024, 1, 1), _dt.date(2026, 8, 31), color="#e9edf5", zorder=0)
+    ax.text(_dt.date(2024, 2, 1), ax.get_ylim()[1] * 0.92, "holdout: one look", color=MUTED, fontsize=8)
+    ax.set_title(
+        f"VXX candidate A, registered then read once: holdout Sharpe {look['candidate_A']['sharpe']:.2f} vs "
+        f"{look['always_short']['sharpe']:.2f} for always short (FAIL)"
+    )
+    ax.legend(loc="upper left")
+    fig.tight_layout()
+    fig.savefig(FIG / "vxx_holdout.png")
+    plt.close(fig)
+    return {k: look[k] for k in ("window", "candidate_A", "always_short", "vs_always_short", "gates", "pass")}
+
+
+def equity(store: ArtifactStore, home: Path) -> dict[str, Any]:
+    recs = records(home, "equity_ls")
+    rec = next(
+        r
+        for r in reversed(recs)
+        if "incremental" in r["results"]
+        and r["meta"].get("params", {}).get("fundamentals", "published") == "published"
+        and not r["meta"].get("search")
+    )
+    E, F, inc = load(store, rec, "eval_main"), load(store, rec, "factors"), load(store, rec, "incremental")
+    fig, ax = plt.subplots(1, 2, figsize=(11, 3.6), gridspec_kw={"width_ratios": [2.2, 1]})
+    d = pl.DataFrame(E["daily"]).with_columns(pl.col("date").str.to_date())
+    ax[0].plot(d["date"], np.cumsum(d["ls"].to_numpy()), color=INK, lw=1.6, label="model (ensemble)")
+    for (name, factor_series), c in zip(F.items(), ["#3b6fd8", "#e0823d", "#8b5cd6", "#2e9e6a"], strict=False):
+        dd = sorted((k, v) for k, v in factor_series.items() if k >= str(d["date"].min()))
+        ax[0].plot(
+            [pl.Series([k]).str.to_date()[0] for k, _ in dd],
+            np.cumsum([v for _, v in dd]),
+            color=c,
+            lw=1,
+            label=name.replace("_", " "),
+        )
+    ax[0].set_title("S&P 500 decile L/S 2015–19 (gross): model vs known factors")
+    ax[0].legend(loc="upper left", fontsize=8, ncol=2)
+    searches = _searches(home, "equity_ls")
+    out: dict[str, Any] = {"incremental": inc, "run_id": rec["run_id"]}
+    if searches:
+        srch = searches[-1]
+        xs = [c["sharpe"] for c in srch["candidates"]]
+        ys = [c["sharpe_without_top5"] or 0 for c in srch["candidates"]]
+        ax[1].scatter(xs, ys, s=18, color="#3b6fd8")
+        ax[1].axvline(srch["deflated"]["expected_max_sharpe_null"], color="#c94f4f", lw=1, ls="--")
+        ax[1].text(
+            srch["deflated"]["expected_max_sharpe_null"],
+            min(ys),
+            " expected max\n of 18 nulls",
+            color="#c94f4f",
+            fontsize=7,
+        )
+        ax[1].set_xlabel("Sharpe")
+        ax[1].set_ylabel("Sharpe without its 5 best months")
+        ax[1].set_title(f"structural search: DSR {srch['deflated']['dsr']:.2f}, PBO {srch['pbo']['pbo']:.2f}")
+        out["search"] = {k: srch[k] for k in ("deflated", "walk_forward_selection", "pbo")}
+    fig.tight_layout()
+    fig.savefig(FIG / "equity_ls.png")
+    plt.close(fig)
+    return out
+
+
+def spy_timing(store: ArtifactStore, home: Path) -> dict[str, Any]:
+    rec = latest_with(records(home, "spy_timing"), ["report", "eval_ensemble", "eval_baselines"])
+    E, B, rep = load(store, rec, "eval_ensemble"), load(store, rec, "eval_baselines"), load(store, rec, "report")
+    fig, ax = plt.subplots(figsize=(11, 3.4))
+    for name, st, c in (
+        ("buy and hold", B["buy_and_hold"], INK),
+        ("ensemble (long-or-flat)", E["book"], "#3b6fd8"),
+        ("volatility target", B["vol_target_long"], "#2e9e6a"),
+        ("200-day trend", B["trend_200"], "#e0823d"),
+    ):
+        d = pl.DataFrame(st["daily"]).with_columns(pl.col("date").str.to_date())
+        ax.plot(d["date"], np.cumsum(d["pnl"].to_numpy()), color=c, lw=1.2, label=f"{name}: Sharpe {st['sharpe']:.2f}")
+    ax.set_title("SPY timing, 2014–2019 OOS: nothing beats holding")
+    ax.legend(loc="upper left", fontsize=8)
+    fig.tight_layout()
+    fig.savefig(FIG / "spy_timing.png")
+    plt.close(fig)
+    return {"books": rep["books"], "run_id": rec["run_id"]}
+
+
+def twin_search(home: Path) -> dict[str, Any]:
+    srch = _searches(home, "equity_twin")
+    if len(srch) < 2:
+        return {}
+    fig, ax = plt.subplots(1, 2, figsize=(11, 3.4), sharey=True)
+    for a, s_, title in ((ax[0], srch[-2], "planted signal"), (ax[1], srch[-1], "null twin")):
+        xs = sorted((c["sharpe"] for c in s_["candidates"]), reverse=True)
+        a.bar(range(len(xs)), xs, color="#3b6fd8")
+        a.axhline(s_["deflated"]["expected_max_sharpe_null"], color="#c94f4f", ls="--", lw=1)
+        a.axhline(s_["walk_forward_selection"]["selected_oos_sharpe"], color="#2e9e6a", lw=1.5)
+        a.set_title(f"{title}: DSR {s_['deflated']['dsr']:.2f} · PBO {s_['pbo']['pbo']:.2f}")
+        a.set_xlabel("candidates, best first")
+    ax[0].set_ylabel("Sharpe")
+    note = "red dashed: expected max of the null trials · green: walk-forward selection, no hindsight"
+    fig.suptitle(note, fontsize=8, color=MUTED, y=0.02)
+    fig.tight_layout()
+    fig.savefig(FIG / "twin_search.png")
+    plt.close(fig)
+    return {
+        "signal": {k: srch[-2][k] for k in ("deflated", "walk_forward_selection", "pbo")},
+        "null": {k: srch[-1][k] for k in ("deflated", "walk_forward_selection", "pbo")},
+    }
+
+
 def main() -> None:
     cfg = load_config().config
     FIG.mkdir(exist_ok=True)
     store = ArtifactStore(cfg.paths.store_dir())
     home = cfg.paths.home
     ref = cfg.data.get("slalom")
-    numbers = {"slalom": slalom(store, home, ref / "wf" if ref else None), "vxx": vxx(store, home)}
+    numbers = {
+        "slalom": slalom(store, home, ref / "wf" if ref else None),
+        "vxx": vxx(store, home),
+        "vxx_holdout": vxx_holdout(store, home),
+        "equity_ls": equity(store, home),
+        "spy_timing": spy_timing(store, home),
+        "twin_search": twin_search(home),
+    }
     (HERE / "numbers.json").write_text(json.dumps(numbers, indent=1, default=str))
     print(f"wrote {len(list(FIG.glob('*.png')))} figures and numbers.json under {HERE}")
 

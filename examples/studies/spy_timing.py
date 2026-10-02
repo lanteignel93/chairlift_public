@@ -19,7 +19,7 @@ from chairlift.schedule.walkforward import WalkForward
 from chairlift.study.build import FeatureSet, Model, Source, Study, TimeSeriesBook
 from chairlift.verify.twins import TimeSeriesTwin, time_series_twin
 
-STUDY_NAME = "spy_timing"
+STUDY_NAME = "spy_twin"
 HEADLINE = {
     "stage": "eval_ridge",
     "sharpe": "book.sharpe",

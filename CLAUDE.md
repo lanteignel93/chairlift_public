@@ -22,6 +22,10 @@ clients: slalom (cross-sectional, the golden reference) and VXX (time series, th
 - **Every increment lands with its test.** Important logic units get a `debug_walkthroughs/wt_<topic>.py` (seeded,
   tiny, asserted, `--pdb`), and `tests/test_walkthroughs.py` runs every walkthrough.
 - **In-fold or it is not a number:** transforms, selection, search and stacking fit on training rows only.
+- **Declare studies with `chairlift.study.build.Study`**; a factory `study(*, knobs) -> Study`. Anything a stage
+  depends on is its spec, its inputs, a captured value, or code the digest can see. Code reached through a module
+  imported at run time (a client's own engine) goes into a fingerprint explicitly.
+- **Holdouts open once, through the ledger, on Laurent's go.** Gates are written down before the look.
 
 ## Commands
 
@@ -46,6 +50,11 @@ uv run chairlift sweep examples/experiments/toy-sweep.toml --dry-run    # cells 
 uv run chairlift rerun RUN                                              # rebuild from the record in a fresh dir; byte-compare
 uv run chairlift compare RUN_A RUN_B                                    # params, specs, data, outputs, env, metrics
 uv run python scripts/gen_cli_reference.py                              # after any CLI change (tests/docs checks it)
+uv run chairlift search examples/experiments/equity-search.toml --jobs 8   # candidates judged: DSR, walk-forward selection, PBO
+uv run chairlift ledger --study vxx                                     # trials, deflated Sharpe, holdout state
+uv run chairlift holdout open --study NAME --reason "..."              # ONE look, irreversible: only on Laurent's explicit go
+uv run chairlift report --index ; uv run chairlift alerts check         # HTML reports; failed / died / stalled runs
+uv run chairlift submit EXP.toml --watchdog 45min                       # systemd transient unit (chairlift systemd install once)
 ```
 
 User guide: `docs/guide/` (repo-first; describes shipped behaviour only, with real command output). When a command's
