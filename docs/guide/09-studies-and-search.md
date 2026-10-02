@@ -47,7 +47,7 @@ nothing else.
 | `Model` | a `FitSpec` on a panel's columns | `FeatureSet(columns=…)` or `FeatureSet(exclude=…)` |
 | `FitSpec` | what is fitted, per fold, on training rows only | `RidgeSpec(alpha, intercept)`, `LightGBMSpec(params, seeds, deterministic)`, `RuleSpec`; `selection=ClusterSelection()`; `cross_section=False` for one row per date |
 | `Ensemble` | z-scored members, weighted | within date for a cross-section; by training-fold moments for a time series |
-| `CrossSectionBook` | long the top `q`, short the bottom `q`, among eligible names | `paths(book)` gives each position's P&L path; `frame_for` puts a book on another universe; `per_position`; `min_live` (start once both sides hold that many) |
+| `CrossSectionBook` | long the top `q`, short the bottom `q`, among eligible names | `paths(book, *paths_inputs)` gives each position's P&L path, reading other stages if it needs them (a price grid); `frame_for` puts a book on another universe; `per_position`; `min_live` (start once both sides hold that many) |
 | `QuantileBook` | how the book ranks | within date (default), or `pool_days` / `min_pool`: against the trailing pool of earlier rows, for events |
 | `TimeSeriesBook` | a position through time | `sign_models` (rules), `short_or_flat`, `constants`, `rules` (position columns), `benchmark` (every book's paired Sharpe difference) |
 | `DailyStatsSpec` | the statistics | `periods` (252 daily, 12 monthly), block bootstrap `block`, `n_boot`, `seed` |

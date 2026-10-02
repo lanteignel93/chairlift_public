@@ -17,7 +17,8 @@ Found by the fifth client (event-driven, pooled events):
 - LightGBM's numpy feature-name warning is silenced at predict.
 - **Event books:** `QuantileBook(pool_days, min_pool)` ranks each row against the trailing pool of earlier rows, not
   within its date. `CrossSectionBook(min_live)` starts the daily series once both sides hold that many positions. A
-  pool book reads its OOS IC across each year's rows. A study with no evaluations has no `report` stage.
+  pool book reads its OOS IC across each year's rows. A study with no evaluations has no `report` stage. `CrossSectionBook(paths_inputs)`: a
+  paths function may read other stages (`paths(book, *outputs)`), e.g. a price grid.
 
 ## 0.1.0 (2026-10-02)
 

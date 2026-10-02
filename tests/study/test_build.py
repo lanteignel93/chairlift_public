@@ -143,6 +143,21 @@ def test_an_event_book_ranks_against_a_trailing_pool_and_waits_for_its_ramp(tmp_
     assert "oos_ic_all" in ev["ic"]  # pooled across the year's rows
 
 
+def test_paths_can_read_other_stages(tmp_path: Path):
+    def paths_from_panel(book: pl.DataFrame, panel: pl.DataFrame) -> pl.DataFrame:
+        assert "y_z" in panel.columns  # the panel stage's output, handed in by name
+        return paths(book)
+
+    base = cs_study()
+    b = CrossSectionBook(
+        spec=QuantileBook(), frame="panel", paths=paths_from_panel, paths_inputs=("panel",), per_position=True
+    )
+    s = Study(**{**base.__dict__, "book": b, "evaluate": ("a",)})
+    assert next(st for st in s.stages() if st.name == "paths_a").inputs == ("book_a", "panel")
+    p = s.pipeline(tmp_path)
+    assert p.load("eval_a", p.run())["ls"]["n_days"] > 0
+
+
 def test_a_study_without_evaluations_has_no_report_stage():
     s = Study(**{**cs_study().__dict__, "evaluate": ()})
     assert "report" not in {st.name for st in s.stages()}
