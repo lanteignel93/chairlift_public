@@ -25,6 +25,9 @@ clients: slalom (cross-sectional, the golden reference) and VXX (time series, th
 - **Declare studies with `chairlift.study.build.Study`**; a factory `study(*, knobs) -> Study`. Anything a stage
   depends on is its spec, its inputs, a captured value, or code the digest can see. Code reached through a module
   imported at run time (a client's own engine) goes into a fingerprint explicitly.
+- **No number is written down before `chairlift rerun` reproduces its run bit for bit.** Caching hides a client
+  stage that is not a pure function (an unordered `unique(keep="first")`, ties in a sort): two equity/PEAD bugs of
+  that kind moved published Sharpes by 0.05 until a rerun caught them.
 - **Holdouts open once, through the ledger, on Laurent's go.** Gates are written down before the look.
 
 ## Commands
