@@ -14,16 +14,21 @@ Every example here is in `examples/` and runs without data.
 ```python
 from chairlift.study.build import CrossSectionBook, Ensemble, FeatureSet, Model, Source, Study
 
-def study(*, alpha: float = 1e-2, q: float = 0.1) -> Study:      # keyword-only: these are the experiment's knobs
+
+def study(*, alpha: float = 1e-2, q: float = 0.1) -> Study:  # keyword-only: these are the experiment's knobs
     return Study(
         name="equity_ls",
-        sources=(Source("twin", cross_section_twin, spec=CrossSectionTwin(), fingerprint=lambda: "synthetic"),
-                 Source("panel", panel, spec=PanelSpec(), inputs=("twin",)),
-                 Source("frame", frame, inputs=("twin",))),
-        index="panel",                                            # the folds count on its entry / exit dates
+        sources=(
+            Source("twin", cross_section_twin, spec=CrossSectionTwin(), fingerprint=lambda: "synthetic"),
+            Source("panel", panel, spec=PanelSpec(), inputs=("twin",)),
+            Source("frame", frame, inputs=("twin",)),
+        ),
+        index="panel",  # the folds count on its entry / exit dates
         schedule=WalkForward(start=dt.date(2012, 1, 1), first_test_year=2016, mode="expanding", embargo=1),
-        models=(Model("ridge", FitSpec(model=RidgeSpec(alpha=alpha)), "panel", FeatureSet(exclude=KEYS)),
-                Model("gbm", FitSpec(model=LightGBMSpec(params=GBM, seeds=(0, 1, 2))), "panel", FeatureSet(exclude=KEYS))),
+        models=(
+            Model("ridge", FitSpec(model=RidgeSpec(alpha=alpha)), "panel", FeatureSet(exclude=KEYS)),
+            Model("gbm", FitSpec(model=LightGBMSpec(params=GBM, seeds=(0, 1, 2))), "panel", FeatureSet(exclude=KEYS)),
+        ),
         ensembles=(Ensemble("ensemble", ("ridge", "gbm")),),
         book=CrossSectionBook(spec=QuantileBook(q=q), frame="frame", paths=one_period_paths, per_position=True),
         stats=DailyStatsSpec(periods=12, block=3),
@@ -82,7 +87,14 @@ Every run is charged to `studies/<name>/ledger.jsonl`. A new signature is a new 
 signature is not. When the study module declares a `HEADLINE`, the trial records it:
 
 ```python
-HEADLINE = {"stage": "eval_ensemble", "sharpe": "ls.sharpe", "n_obs": "ls.n_days", "periods": 12, "daily": "daily", "value": "ls"}
+HEADLINE = {
+    "stage": "eval_ensemble",
+    "sharpe": "ls.sharpe",
+    "n_obs": "ls.n_days",
+    "periods": 12,
+    "daily": "daily",
+    "value": "ls",
+}
 ```
 
 ```bash
