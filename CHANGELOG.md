@@ -3,6 +3,19 @@
 The public API is `chairlift.__all__` ([docs/guide/10-api.md](docs/guide/10-api.md)). Until 1.0 a minor version may
 change it; every change is listed here.
 
+## 0.1.1 (2026-10-02)
+
+Found by the fifth client (event-driven, pooled events):
+- **Identity fix:** a module-level value a stage reads (`START = date(...)`, a parameter table) is now part of its
+  code digest. Before, editing one re-keyed nothing and reused stale results. Values that cannot be canonical
+  (frames, locks) are skipped.
+- Digest keys no longer include line numbers: moving a function in its file does not re-key.
+- Every code digest changes with this release, so the first run after upgrading rebuilds every stage.
+- `chairlift show` no longer charges a ledger trial (`Pipeline.run(charge=False)`).
+- `Ensemble.cross_section`: by default it follows the members. Pooled fits (`FitSpec(cross_section=False)`) are
+  z-scored by training moments even under a cross-section book.
+- LightGBM's numpy feature-name warning is silenced at predict.
+
 ## 0.1.0 (2026-10-02)
 
 First versioned release: the runner, the research layer and the operations layer, run by four real clients without
