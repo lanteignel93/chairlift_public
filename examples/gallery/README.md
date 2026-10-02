@@ -1,8 +1,10 @@
-# Gallery: two very different strategies through one pipeline
+# Gallery: very different strategies through one pipeline
 
-Two client studies, both run on the same chairlift modules on 2026-10-01:
+Client studies of very different shapes, all run on the same chairlift modules (2026-10-01 to 10-02):
 - **slalom**: a cross-section of about 800 single names a day; an ML ranking of hedged straddle P&L.
 - **VXX**: one instrument and one row per date; timing the short-term VIX futures index.
+- **equity L/S**: S&P 500 members monthly, with fundamentals as filed.
+- **SPY timing**: one instrument, macro inputs with publication lags.
 
 Everything here is an aggregate of a recorded run: figures, tables, and terminal transcripts. No data ships, and none
 of it is needed to read the page. `build.py` regenerates the figures and `numbers.json` from the run records under
@@ -202,6 +204,20 @@ evaluate   json:1e11b22a0215afb  json:1e11b22a0215afb  identical
 `chairlift compare A B` lines up two runs: parameters, spec hashes, data fingerprints, outputs, environment, and the
 last value of every metric, including metrics of stages a run reused
 ([cli/vxx_compare_h1_vs_h5.txt](cli/vxx_compare_h1_vs_h5.txt)).
+
+## 7. Search v2 on real data: judge the right series
+
+Both real clients get in-fold transform searches: winsorize, interactions and PCA, crossed with the models.
+
+- **Equity L/S:** 14 distinct candidates, best 0.08, DSR 0.19, walk-forward selection −0.63. Nothing.
+- **SPY timing:** a lesson in what to judge. On the book's own return, the 12 candidates look like a find: DSR 0.93,
+  walk-forward selection 0.86. On the return over buy-and-hold, every one is negative (DSR 0.06). The grey bars are
+  the premium from being long SPY, not the timing.
+
+![SPY search](figures/spy_search.png)
+
+That is why time-series studies with a baseline benchmark now get `active_<book>` stages, and why the SPY client's
+HEADLINE judges `active_main`.
 
 ## Files
 

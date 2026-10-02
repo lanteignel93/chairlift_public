@@ -284,9 +284,11 @@ def _vxx_regime(store: ArtifactStore, recs: list[dict[str, Any]]) -> dict[str, A
     return {name: {k: st[k] for k in keep} for name, st in lines.items()}
 
 
-def _searches(home: Path, study: str) -> list[dict[str, Any]]:
+def _searches(home: Path, study: str, experiment: str | None = None) -> list[dict[str, Any]]:
+    """A study's search records, oldest first; with `experiment`, only that experiment file's searches."""
     d = home / "studies" / study / "searches"
-    return [json.loads(f.read_text()) for f in sorted(d.glob("*.json"))] if d.exists() else []
+    out = [json.loads(f.read_text()) for f in sorted(d.glob("*.json"))] if d.exists() else []
+    return [r for r in out if experiment is None or r["experiment"]["name"] == experiment]
 
 
 def vxx_holdout(store: ArtifactStore, home: Path) -> dict[str, Any]:
@@ -339,7 +341,7 @@ def equity(store: ArtifactStore, home: Path) -> dict[str, Any]:
         )
     ax[0].set_title("S&P 500 decile L/S 2015–19 (gross): model vs known factors")
     ax[0].legend(loc="upper left", fontsize=8, ncol=2)
-    searches = _searches(home, "equity_ls")
+    searches = _searches(home, "equity_ls", "structure-search")
     out: dict[str, Any] = {"incremental": inc, "run_id": rec["run_id"]}
     if searches:
         srch = searches[-1]
@@ -350,7 +352,7 @@ def equity(store: ArtifactStore, home: Path) -> dict[str, Any]:
         ax[1].text(
             srch["deflated"]["expected_max_sharpe_null"],
             min(ys),
-            " expected max\n of 18 nulls",
+            f" expected max\n of {srch['deflated']['n_trials']} nulls",
             color="#c94f4f",
             fontsize=7,
         )
@@ -358,6 +360,9 @@ def equity(store: ArtifactStore, home: Path) -> dict[str, Any]:
         ax[1].set_ylabel("Sharpe without its 5 best months")
         ax[1].set_title(f"structural search: DSR {srch['deflated']['dsr']:.2f}, PBO {srch['pbo']['pbo']:.2f}")
         out["search"] = {k: srch[k] for k in ("deflated", "walk_forward_selection", "pbo")}
+    tf = _searches(home, "equity_ls", "transform-search")
+    if tf:
+        out["transform_search"] = {k: tf[-1][k] for k in ("deflated", "walk_forward_selection", "pbo")}
     fig.tight_layout()
     fig.savefig(FIG / "equity_ls.png")
     plt.close(fig)
@@ -382,6 +387,41 @@ def spy_timing(store: ArtifactStore, home: Path) -> dict[str, Any]:
     fig.savefig(FIG / "spy_timing.png")
     plt.close(fig)
     return {"books": rep["books"], "run_id": rec["run_id"]}
+
+
+def spy_search(home: Path) -> dict[str, Any]:
+    """The same 12 candidates judged twice: on the book's own return, and on its return over buy-and-hold."""
+    srch = _searches(home, "spy_timing", "transform-search")
+    if len(srch) < 2:
+        return {}
+    own, act = srch[0], srch[-1]
+    by = {json.dumps(c["params"], sort_keys=True): c["sharpe"] for c in act["candidates"]}
+    rows = sorted(
+        ((json.dumps(c["params"], sort_keys=True), c["params"], c["sharpe"]) for c in own["candidates"]),
+        key=lambda r: -r[2],
+    )
+    fig, ax = plt.subplots(figsize=(11, 3.6))
+    x = np.arange(len(rows))
+    ax.bar(x - 0.2, [r[2] for r in rows], 0.4, color="#9aa2b5", label=f"own return: DSR {own['deflated']['dsr']:.2f}")
+    ax.bar(
+        x + 0.2,
+        [by[r[0]] for r in rows],
+        0.4,
+        color="#3b6fd8",
+        label=f"over buy-and-hold: DSR {act['deflated']['dsr']:.2f}",
+    )
+    ax.axhline(0, color=INK, lw=0.8)
+    ax.set_xticks(x, [f"{r[1]['transform']}\n{r[1]['model']}" for r in rows], fontsize=7)
+    ax.set_ylabel("Sharpe")
+    ax.set_title("SPY timing search: the same candidates, judged on the right series")
+    ax.legend(loc="upper right", fontsize=8)
+    fig.tight_layout()
+    fig.savefig(FIG / "spy_search.png")
+    plt.close(fig)
+    return {
+        "own_return": {k: own[k] for k in ("deflated", "walk_forward_selection", "pbo")},
+        "active_return": {k: act[k] for k in ("deflated", "walk_forward_selection", "pbo")},
+    }
 
 
 def twin_search(home: Path) -> dict[str, Any]:
@@ -420,6 +460,7 @@ def main() -> None:
         "vxx_holdout": vxx_holdout(store, home),
         "equity_ls": equity(store, home),
         "spy_timing": spy_timing(store, home),
+        "spy_search": spy_search(home),
         "twin_search": twin_search(home),
     }
     (HERE / "numbers.json").write_text(json.dumps(numbers, indent=1, default=str))
