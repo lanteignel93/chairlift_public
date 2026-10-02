@@ -122,6 +122,7 @@ class CrossSectionBook:
     per_position: bool = False  # Sharpe of the equal-weight spread (ls_pp) instead of the unit-per-name book
     ic_target: str = "y_rank"
     frame_for: tuple[tuple[str, str], ...] = ()  # (evaluation name, frame source) where a book uses another universe
+    min_live: int = 0  # the daily series starts once both sides hold this many live positions (an event book's ramp)
 
     def frame_of(self, name: str) -> str:
         return dict(self.frame_for).get(name, self.frame)
@@ -200,7 +201,8 @@ class Study:
                     )
                 )
                 ins = (f"book_{n}", f"paths_{n}", p, fr)
-                fn = _cs_eval_stage(ins, keys, b.end, b.per_position, b.ic_target)
+                pooled = b.spec.pool_days > 0
+                fn = _cs_eval_stage(ins, keys, b.end, b.per_position, b.ic_target, b.min_live, pooled)
                 out.append(Stage(f"eval_{n}", fn, ins, spec=self.stats))
         else:
             b = self.book
@@ -219,7 +221,8 @@ class Study:
             ("eval_baselines",) if isinstance(self.book, TimeSeriesBook) else ()
         )
         bench = self.book.benchmark if isinstance(self.book, TimeSeriesBook) else None
-        out.append(Stage("report", _report_stage(evals, bench), evals, spec=self.stats))
+        if evals:  # a study that books everything in extra stages has nothing to report here
+            out.append(Stage("report", _report_stage(evals, bench), evals, spec=self.stats))
         return out + list(self.extra)
 
 
@@ -282,7 +285,13 @@ def _cs_paths_stage(book: str, paths: Callable[[pl.DataFrame], pl.DataFrame]) ->
 
 
 def _cs_eval_stage(
-    ins: tuple[str, ...], keys: tuple[str, ...], end: Any, per_position: bool, ic_target: str
+    ins: tuple[str, ...],
+    keys: tuple[str, ...],
+    end: Any,
+    per_position: bool,
+    ic_target: str,
+    min_live: int = 0,
+    pooled_ic: bool = False,
 ) -> Callable[..., dict[str, Any]]:
     book_n, paths_n, pred_n, frame_n = ins
 
@@ -291,9 +300,18 @@ def _cs_eval_stage(
         day = daily_book(bk.filter(pl.col("side").is_not_null()), inputs[paths_n], keys=keys, end=end)
         if per_position:
             day = day.with_columns(ls=pl.col("ls_pp"))
+        if min_live > 0:
+            first = day.filter((pl.col("n_long") >= min_live) & (pl.col("n_short") >= min_live))["date"].min()
+            day = day.filter(pl.col("date") >= first) if first is not None else day.clear()
         out = book_stats(day, s)
         oos = inputs[pred_n].filter(~pl.col("is_train")).select(*keys, "pred")
-        out["ic"] = ic_by_year(frame.join(oos, on=list(keys), how="inner"), target=ic_target, date=keys[-1])
+        joined = frame.join(oos, on=list(keys), how="inner")
+        # events a few a day: a within-date IC is noise or undefined, so read it across the year's rows
+        out["ic"] = (
+            ts_ic_by_year(joined, target=ic_target, date=keys[-1])
+            if pooled_ic
+            else ic_by_year(joined, target=ic_target, date=keys[-1])
+        )
         out["daily"] = (
             day.with_columns(pl.col("date").cast(pl.String))
             .select("date", "long", "short", "ls", "n_long", "n_short")

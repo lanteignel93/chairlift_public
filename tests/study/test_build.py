@@ -123,6 +123,31 @@ def test_a_time_series_study_compares_every_book_to_its_benchmark(tmp_path: Path
     assert act["daily"][0]["pnl"] == mine - held
 
 
+def test_an_event_book_ranks_against_a_trailing_pool_and_waits_for_its_ramp(tmp_path: Path):
+    base = cs_study()
+    s = Study(
+        **{
+            **base.__dict__,
+            "book": CrossSectionBook(
+                spec=QuantileBook(pool_days=62, min_pool=60), frame="panel", paths=paths, per_position=True, min_live=5
+            ),
+            "evaluate": ("a",),
+        }
+    )
+    p = s.pipeline(tmp_path)
+    rep = p.run()
+    bk, ev = p.load("book_a", rep), p.load("eval_a", rep)
+    first_month = bk["t0"].min()
+    assert bk.filter(pl.col("t0") == first_month)["pct"].null_count() == bk.filter(pl.col("t0") == first_month).height
+    assert min(min(r["n_long"], r["n_short"]) for r in ev["daily"]) >= 5
+    assert "oos_ic_all" in ev["ic"]  # pooled across the year's rows
+
+
+def test_a_study_without_evaluations_has_no_report_stage():
+    s = Study(**{**cs_study().__dict__, "evaluate": ()})
+    assert "report" not in {st.name for st in s.stages()}
+
+
 def test_feature_sets_resolve_explicit_columns_or_exclusions():
     f = pl.DataFrame({"k": [1], "a": [1.0], "b": [2.0]})
     assert FeatureSet(columns=("b",)).resolve(f) == ["b"]

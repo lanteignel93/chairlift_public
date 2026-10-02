@@ -47,7 +47,8 @@ nothing else.
 | `Model` | a `FitSpec` on a panel's columns | `FeatureSet(columns=…)` or `FeatureSet(exclude=…)` |
 | `FitSpec` | what is fitted, per fold, on training rows only | `RidgeSpec(alpha, intercept)`, `LightGBMSpec(params, seeds, deterministic)`, `RuleSpec`; `selection=ClusterSelection()`; `cross_section=False` for one row per date |
 | `Ensemble` | z-scored members, weighted | within date for a cross-section; by training-fold moments for a time series |
-| `CrossSectionBook` | long the top `q`, short the bottom `q`, among eligible names | `paths(book)` gives each position's P&L path; `frame_for` puts a book on another universe; `per_position` |
+| `CrossSectionBook` | long the top `q`, short the bottom `q`, among eligible names | `paths(book)` gives each position's P&L path; `frame_for` puts a book on another universe; `per_position`; `min_live` (start once both sides hold that many) |
+| `QuantileBook` | how the book ranks | within date (default), or `pool_days` / `min_pool`: against the trailing pool of earlier rows, for events |
 | `TimeSeriesBook` | a position through time | `sign_models` (rules), `short_or_flat`, `constants`, `rules` (position columns), `benchmark` (every book's paired Sharpe difference) |
 | `DailyStatsSpec` | the statistics | `periods` (252 daily, 12 monthly), block bootstrap `block`, `n_boot`, `seed` |
 
@@ -59,6 +60,14 @@ null fill, in order:
 
 A transform's choices (quantiles, chosen pairs, loadings) are as unknown to the test year as the model's weights. A
 fold's `info` records them, with the model's final input names.
+
+**Events** (earnings filings, announcements: a few rows a day, each held for its own path) use the same pieces, set
+differently:
+- `FitSpec(cross_section=False)`: checks and the in-sample IC are pooled over rows
+- `QuantileBook(pool_days=91, min_pool=200)`: rank each event against the 91 days before it
+- `CrossSectionBook(per_position=True, min_live=10)`: the equal-weight spread of live positions, from the day both
+  sides hold 10
+- ensembles follow their members and standardise by training moments
 
 `RuleSpec` searches, inside each fold, one input × one training quantile × one side by the position's own
 training Sharpe. "Always in" is one of its candidates. It is the model to use when the question is "when should the

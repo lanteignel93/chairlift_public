@@ -15,6 +15,9 @@ Found by the fifth client (event-driven, pooled events):
 - `Ensemble.cross_section`: by default it follows the members. Pooled fits (`FitSpec(cross_section=False)`) are
   z-scored by training moments even under a cross-section book.
 - LightGBM's numpy feature-name warning is silenced at predict.
+- **Event books:** `QuantileBook(pool_days, min_pool)` ranks each row against the trailing pool of earlier rows, not
+  within its date. `CrossSectionBook(min_live)` starts the daily series once both sides hold that many positions. A
+  pool book reads its OOS IC across each year's rows. A study with no evaluations has no `report` stage.
 
 ## 0.1.0 (2026-10-02)
 

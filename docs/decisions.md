@@ -314,3 +314,24 @@ once.
 - **Results:** in-fold transforms find nothing on equity L/S (14 distinct: best 0.08, DSR 0.19, walk-forward
   selection −0.63) or SPY (DSR 0.06 on active return). Both stay dev nulls, with sealed holdouts.
 
+
+## 2026-10-02 (night) — 0.1.1: what the fifth client found
+
+The event-driven PEAD client (SEC filings as events, a local client repository) was built without touching the core,
+on purpose, and reported what it had to work around.
+- **Module values in the digest.** A study's `START = date(2011, 6, 1)` or `K = 2` read by a stage was invisible to
+  its key: change the value, and the stale result was reused. This is the worst kind of bug in this package, silent
+  and wrong. Every module-level value a reached function reads is now hashed by its canonical JSON. Values that have
+  none (frames, locks) are skipped, not refused: refusing would break every study that reads a logger.
+- **No line numbers in digest keys.** Inserting a function above a stage re-keyed it.
+- **`show` charges no trial.** Looking at a stage is not an experiment.
+- **Event books in the core.**
+  - `QuantileBook(pool_days, min_pool)` ranks against the trailing pool of earlier rows: same-day rows never see each
+    other, and nothing later is in the pool.
+  - `CrossSectionBook(min_live)` starts the series at the ramp.
+  - The ensemble's standardisation follows its members (pooled fits use training moments), not the book's type.
+  - The client's own calendar book can now be replaced by the built-in one. That is the test: it must give the same
+    numbers.
+- **Kept open:** a fold-boundary seam in the trailing pool (for `pool_days` after each refit, the pool mixes two
+  models' prediction scales). Ranking each fold's predictions within the fold would remove it, but would rank January
+  against nothing. Documented, not fixed.
