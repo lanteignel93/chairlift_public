@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import datetime as dt
 from pathlib import Path
 
@@ -125,14 +126,12 @@ def test_a_time_series_study_compares_every_book_to_its_benchmark(tmp_path: Path
 
 def test_an_event_book_ranks_against_a_trailing_pool_and_waits_for_its_ramp(tmp_path: Path):
     base = cs_study()
-    s = Study(
-        **{
-            **base.__dict__,
-            "book": CrossSectionBook(
-                spec=QuantileBook(pool_days=62, min_pool=60), frame="panel", paths=paths, per_position=True, min_live=5
-            ),
-            "evaluate": ("a",),
-        }
+    s = dataclasses.replace(
+        base,
+        book=CrossSectionBook(
+            spec=QuantileBook(pool_days=62, min_pool=60), frame="panel", paths=paths, per_position=True, min_live=5
+        ),
+        evaluate=("a",),
     )
     p = s.pipeline(tmp_path)
     rep = p.run()
@@ -152,14 +151,14 @@ def test_paths_can_read_other_stages(tmp_path: Path):
     b = CrossSectionBook(
         spec=QuantileBook(), frame="panel", paths=paths_from_panel, paths_inputs=("panel",), per_position=True
     )
-    s = Study(**{**base.__dict__, "book": b, "evaluate": ("a",)})
+    s = dataclasses.replace(base, book=b, evaluate=("a",))
     assert next(st for st in s.stages() if st.name == "paths_a").inputs == ("book_a", "panel")
     p = s.pipeline(tmp_path)
     assert p.load("eval_a", p.run())["ls"]["n_days"] > 0
 
 
 def test_a_study_without_evaluations_has_no_report_stage():
-    s = Study(**{**cs_study().__dict__, "evaluate": ()})
+    s = dataclasses.replace(cs_study(), evaluate=())
     assert "report" not in {st.name for st in s.stages()}
 
 
