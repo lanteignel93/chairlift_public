@@ -59,7 +59,7 @@ WITHIN = {
     "features": ["test_cross_section", "test_time_series"],
     "learn": ["test_models", "test_selection", "test_fit"],
     "book": ["test_quantile", "test_timeseries"],
-    "evaluate": ["test_daily", "test_deflated"],
+    "evaluate": ["test_daily", "test_deflated", "test_attribution"],
     "ledger": ["test_trials", "test_holdout"],
     "report": ["test_html"],
     "study": ["test_build"],
