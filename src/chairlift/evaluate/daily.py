@@ -62,6 +62,9 @@ def _sharpe(x: np.ndarray, periods: int = 252) -> float:
 
 
 def daily_stats(x: np.ndarray, dates: Sequence[dt.date], s: DailyStatsSpec) -> dict[str, Any]:
+    """A return series judged: Sharpe and mean with block-bootstrap CIs, p(mean ≤ 0), Sharpe by year and half-year
+    (with the counts of positive ones), drawdown, and how much the best five periods carry (`top5_share`,
+    `sharpe_without_top5`)."""
     x = np.asarray(x, float)
     n = len(x)
     years = np.array([d.year for d in dates])

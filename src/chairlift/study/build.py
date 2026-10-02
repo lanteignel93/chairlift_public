@@ -17,6 +17,8 @@ Stages it builds, by name:
 - `fit_<model>` for each model, and `ens_<ensemble>` for each ensemble
 - `eval_<name>` for each model and ensemble the book evaluates (with `book_<name>` and `paths_<name>` for a
   cross-section)
+- for a time series, `eval_baselines`, and `active_<name>` when the benchmark is a baseline: the book's return minus
+  the benchmark's, the series to judge when the benchmark itself earns a premium
 - `report`: every evaluation's headline numbers side by side
 - any `extra` stages the study adds (a replication check, a diagnostic)
 
@@ -27,11 +29,13 @@ that returns the Study, as before.
 
 from __future__ import annotations
 
+import datetime as dt
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal, cast
 
+import numpy as np
 import polars as pl
 
 from chairlift.book.quantile import QuantileBook, quantile_book
@@ -81,6 +85,8 @@ class Source:
 
 @dataclass(frozen=True)
 class Model:
+    """One walk-forward fit: `fit` on `features` of the source `panel`; becomes the stage `fit_<name>`."""
+
     name: str
     fit: FitSpec
     panel: str
@@ -89,6 +95,8 @@ class Model:
 
 @dataclass(frozen=True)
 class Ensemble:
+    """Z-scored member predictions, weighted (equal by default); becomes the stage `ens_<name>`."""
+
     name: str
     members: tuple[str, ...]
     weights: tuple[float, ...] = ()  # default: equal
@@ -134,6 +142,9 @@ class TimeSeriesBook:
 
 @dataclass
 class Study:
+    """A whole study, declared: sources, the index the folds count on, the walk-forward schedule, models, ensembles,
+    one book and its statistics, plus any extra stages. `stages()` builds the DAG; `pipeline(root)` wraps it."""
+
     name: str
     sources: Sequence[Source]
     index: str
@@ -191,6 +202,10 @@ class Study:
                 out.append(Stage(f"eval_{n}", fn, (b.frame, p), spec=_TsEval(stats=self.stats, book=b.spec)))
             fn = _ts_baselines_stage(b.frame, b.constants, b.rules, self.schedule)
             out.append(Stage("eval_baselines", fn, (b.frame, "folds"), spec=_TsEval(stats=self.stats, book=b.spec)))
+            if b.benchmark in {c for c, _ in b.constants} | {r for r, _ in b.rules}:
+                for n in names:
+                    fn = _ts_active_stage(f"eval_{n}", b.benchmark)
+                    out.append(Stage(f"active_{n}", fn, (f"eval_{n}", "eval_baselines"), spec=self.stats))
         evals = tuple(f"eval_{n}" for n in names) + (
             ("eval_baselines",) if isinstance(self.book, TimeSeriesBook) else ()
         )
@@ -316,6 +331,24 @@ def _ts_eval_stage(
         return out
 
     return evaluate
+
+
+def _ts_active_stage(ev: str, benchmark: str) -> Callable[..., dict[str, Any]]:
+    """A book's return minus the benchmark's, day by day: what a search should judge when the benchmark itself earns
+    a premium (a long-only timing book is mostly the market; its own Sharpe says little about the timing)."""
+
+    def active(s: DailyStatsSpec, **inputs: Any) -> dict[str, Any]:
+        mine = {d["date"]: d["pnl"] for d in inputs[ev]["book"]["daily"]}
+        base = {d["date"]: d["pnl"] for d in inputs["eval_baselines"][benchmark]["daily"]}
+        dates = sorted(set(mine) & set(base))
+        x = np.array([mine[d] - base[d] for d in dates])
+        st = daily_stats(x, [dt.date.fromisoformat(d) for d in dates], s)
+        st["benchmark"] = benchmark
+        st["daily"] = [{"date": d, "pnl": float(v)} for d, v in zip(dates, x, strict=True)]
+        events.metric("active_sharpe", st["sharpe"])
+        return st
+
+    return active
 
 
 def _ts_baselines_stage(

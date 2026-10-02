@@ -285,3 +285,32 @@ once.
 - **Names:** the twin examples are `equity_twin` / `spy_twin`, so they do not share directories or ledgers with the
   real clients.
 
+## 2026-10-02 (evening) — 0.1.0: a public API, in-fold transforms, and two judging fixes found by real searches
+
+- **Public API = `chairlift.__all__`:** 42 names, loaded lazily from the top level so `import chairlift` and the
+  CLI stay fast. A literal `__all__`, checked against `_EXPORTS` by the tests, so type checkers see it.
+  `docs/guide/10-api.md` is generated from it and checked like the CLI reference. Every public name needs a docstring.
+- **Version 0.1.0, CHANGELOG, `py.typed`.** A CI job builds the wheel, installs it in a clean environment and runs the
+  toy study from it. The empty `diagnose` and `target` packages are removed: a public package should not ship
+  promises.
+- **Site detail:** a test greps every tracked file for machine paths, host names and firm or vendor names. The plans
+  were scrubbed to pass it. The public copy's history was generalized the same way.
+- **In-fold transforms** (`FitSpec.transforms`: `Winsorize`, `Interactions`, `PCA`). Fitted on each fold's training
+  rows, after selection and the fill. Each records its choices in the fold info.
+  - Rejected: transforms as panel stages. They would be fitted on all rows, so a training-quantile clip or a PCA
+    loading would see the test year.
+- **`added(default)` for spec evolution:** a field added at its default is left out of the canonical JSON, so old
+  specs keep their hashes. Without it, adding `transforms` would have re-keyed every fit in every store.
+- **Search counts identical candidates once.** Grid knobs that do not reach the pipeline (a transform's size with no
+  transform) would have added identical trials and inflated N in the deflation.
+- **Judging timing books on active return.** SPY's transform search, judged on the book's own Sharpe, gave DSR 0.93
+  and walk-forward selection 0.86: a "find" that was just being long SPY. Judged on the return over buy-and-hold, it
+  gives DSR 0.06 and every candidate negative.
+  - Hence `active_<book>` stages for time-series studies whose benchmark is a baseline. A long-only or short-only
+    study should name one as its HEADLINE.
+  - PBO stayed low (0.19) through all of it, which is the lesson: PBO tests the choice of candidate, not the edge.
+- **Trial identity = the headline stage's key** (else the signature). Adding the `active_*` stages changed every SPY
+  run signature without changing a single judged number; under the old rule that would have charged 12 trials twice.
+- **Results:** in-fold transforms find nothing on equity L/S (14 distinct: best 0.08, DSR 0.19, walk-forward
+  selection −0.63) or SPY (DSR 0.06 on active return). Both stay dev nulls, with sealed holdouts.
+

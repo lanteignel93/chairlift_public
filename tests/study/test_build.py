@@ -115,6 +115,12 @@ def test_a_time_series_study_compares_every_book_to_its_benchmark(tmp_path: Path
     rep = p.load("report", p.run())["books"]
     assert set(rep) == {"r", "r_short_or_flat", "hold"}
     assert rep["hold"]["vs_hold"]["d_sharpe"] == 0.0 and "d_sharpe_ci" in rep["r"]["vs_hold"]
+    act, ev, base = (p.load(n, p.run()) for n in ("active_r", "eval_r", "eval_baselines"))
+    assert act["benchmark"] == "hold" and act["n_days"] == len(act["daily"])
+    d0 = act["daily"][0]["date"]
+    mine = next(r["pnl"] for r in ev["book"]["daily"] if r["date"] == d0)
+    held = next(r["pnl"] for r in base["hold"]["daily"] if r["date"] == d0)
+    assert act["daily"][0]["pnl"] == mine - held
 
 
 def test_feature_sets_resolve_explicit_columns_or_exclusions():

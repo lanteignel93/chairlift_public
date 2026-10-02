@@ -19,6 +19,15 @@ def test_a_signature_is_one_trial_however_often_it_runs(tmp_path: Path):
     assert [t["signature"] for t in led.trials()] == ["a", "b"]
 
 
+def test_a_new_report_stage_does_not_charge_the_judged_experiment_again(tmp_path: Path):
+    led = Ledger(tmp_path / "ledger.jsonl")
+    assert led.record_trial(signature="s1", run_id="r1", params={}, reason="", headline=None, trial_key="k") is not None
+    # the same headline stage key under a new signature (a stage was added downstream): not a new trial
+    assert led.record_trial(signature="s2", run_id="r2", params={}, reason="", headline=None, trial_key="k") is None
+    assert led.record_trial(signature="s3", run_id="r3", params={}, reason="", headline=None, trial_key="k2")
+    assert [t["run_id"] for t in led.trials()] == ["r1", "r3"]
+
+
 def test_the_holdout_opens_once_with_a_reason_and_later_trials_are_flagged(tmp_path: Path):
     led = Ledger(tmp_path / "ledger.jsonl")
     led.record_trial(signature="a", run_id="r1", params={}, reason="", headline=None)

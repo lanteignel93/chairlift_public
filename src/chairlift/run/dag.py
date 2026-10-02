@@ -207,6 +207,9 @@ def code_digest(fn: Callable[..., Any]) -> str:
 
 @dataclass(frozen=True)
 class Stage:
+    """One node: `fn(spec?, *inputs)` with its identity (spec hash, version, captured values, code digest, input keys,
+    and for a source its data fingerprint). A change to any of them re-keys the stage and everything downstream."""
+
     name: str
     fn: Callable[..., Any]
     inputs: tuple[str, ...] = ()
@@ -282,6 +285,9 @@ class RunReport:
 
 
 class Pipeline:
+    """A DAG of stages over a content-addressed store: `plan` says what would rebuild, `run` builds what is missing
+    and records the run (signature, manifest, ledger trial, events), `load` reads a stage's output."""
+
     def __init__(
         self,
         stages: Iterable[Stage],
@@ -477,9 +483,12 @@ class Pipeline:
         meta: Mapping[str, Any] | None,
         headline: Headline | None,
     ) -> None:
-        """Charge the run to the study's ledger: a new signature is a new trial (a re-run is not)."""
+        """Charge the run to the study's ledger: a new experiment is a new trial (a re-run is not). With a headline,
+        the experiment is the headline stage's key; without one, the run signature."""
         numbers: dict[str, Any] | None = None
+        trial_key: str | None = None
         if headline is not None and headline.stage in report.results:
+            trial_key = report.results[headline.stage].key
             out = self.store.get(report.results[headline.stage].output)
             try:
                 numbers = {
@@ -497,6 +506,7 @@ class Pipeline:
             reason=reason,
             headline=numbers,
             sweep=m.get("sweep"),
+            trial_key=trial_key,
         )
 
     def _new_run_id(self, started: dt.datetime, signature: str) -> str:

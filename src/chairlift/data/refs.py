@@ -1,6 +1,6 @@
 """Data references: studies name data by alias, never by path, and identify it by content.
 
-`DataRef(alias="vendor", relpath="option_close_t5")` is part of a study's definition and of its specs; the site config's
+`DataRef(alias="vendor", relpath="option_close")` is part of a study's definition and of its specs; the site config's
 `[data]` table maps the alias to a directory on this machine. Its fingerprint is a blake3 hash of the bytes (a file) or
 a Merkle hash over sorted (relative path, file hash) pairs (a directory), so the same data copied to two machines, at
 two different paths, gives one fingerprint and therefore one run signature. Dot-files are not data and are skipped.

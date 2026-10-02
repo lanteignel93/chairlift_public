@@ -486,11 +486,23 @@ def search(
     head = Headline.parse(exp.search.get("objective") or built[0].headline)  # the search may judge another book
     if head is None or head.daily is None:
         raise click.UsageError("a search needs the study's HEADLINE with a `daily` path (the series it judges)")
+    # a knob that does not reach the pipeline (a transform's size when there is no transform) gives a candidate
+    # identical to another: it is one trial, not two, and counting it twice would inflate the deflation's N
+    sigs = [b.pipe.signature(b.targets(())).signature for b in built]
+    first = {sg: i for i, sg in reversed(list(enumerate(sigs)))}
+    dupes = [i for i, sg in enumerate(sigs) if first[sg] != i]
     if dry_run:
         for i, c in enumerate(cands):
-            click.echo(f"{i:3d}  {json.dumps(c, sort_keys=True)}")
-        click.echo(f"{len(cands)} candidate(s) · sampler {space.sampler} · seed {space.seed}")
+            same = f"  = {first[sigs[i]]}" if i in dupes else ""
+            click.echo(f"{i:3d}  {sigs[i][:10]}  {json.dumps(c, sort_keys=True)}{same}")
+        click.echo(
+            f"{len(cands) - len(dupes)} distinct candidate(s) of {len(cands)} · sampler {space.sampler} · seed"
+            f" {space.seed}"
+        )
         return
+    cands = [c for i, c in enumerate(cands) if i not in dupes]
+    if dupes:
+        click.echo(f"{len(dupes)} candidate(s) identical to an earlier one dropped", err=True)
     sid = f"{_dt.datetime.now(_dt.UTC):%Y%m%dT%H%M%SZ}-{exp.digest()[:8]}"
     workers = ctx.config().config.compute.workers
     per = max(1, workers // max(1, jobs))  # fold workers per candidate: the machine's budget split between candidates

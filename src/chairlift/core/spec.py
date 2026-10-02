@@ -77,6 +77,14 @@ def spec(*, name: str | None = None, version: int = 1) -> Callable[[type[T]], ty
     return wrap
 
 
+def added(default: Any) -> Any:
+    """A field added to an existing spec without changing its meaning: while it holds `default` it is left out of the
+    canonical JSON, so every spec written before the field existed keeps its hash (and its cached results)."""
+    if isinstance(default, list | dict | set):
+        raise SpecError("added() takes an immutable default (tuple, frozenset, a scalar or a spec)")
+    return dataclasses.field(default=default, metadata={"added": True})
+
+
 def is_spec(obj: Any) -> bool:
     return dataclasses.is_dataclass(obj) and hasattr(type(obj), "__spec_version__")
 
@@ -95,7 +103,11 @@ def canonical(obj: Any) -> Any:
         return 0.0 if obj == 0.0 else obj  # -0.0 and 0.0 are the same parameter
     if is_spec(obj):
         cls = cast(Any, type(obj))
-        body = {f.name: canonical(getattr(obj, f.name)) for f in dataclasses.fields(obj)}
+        body = {
+            f.name: canonical(getattr(obj, f.name))
+            for f in dataclasses.fields(obj)
+            if not (f.metadata.get("added") and getattr(obj, f.name) == f.default)
+        }
         return {"__spec__": str(cls.__spec_name__), "__version__": int(cls.__spec_version__), **body}
     if dataclasses.is_dataclass(obj) and not isinstance(obj, type):
         raise SpecError(f"{type(obj).__qualname__} is a dataclass but not a @spec; declare it with @spec")

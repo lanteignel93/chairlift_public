@@ -3,6 +3,7 @@
 Per fold:
 - training rows are re-checked against the embargo (the fit never trusts the caller's fold table)
 - optional in-fold selection chooses the inputs on the training rows (`learn.selection`)
+- optional in-fold transforms (`learn.transforms`: winsorize, interactions, PCA) are fitted on the training rows
 - nulls are filled with `fill`, the uninformative value: 0.5 for a percentile rank, 0 for a demeaned rank
 - the prediction must vary within every test date (a constant prediction cannot rank); for a time series
   (`cross_section=False`, one row per date) it must vary over the test period instead
@@ -20,9 +21,10 @@ from typing import Any
 
 import polars as pl
 
-from chairlift.core.spec import spec
+from chairlift.core.spec import added, spec
 from chairlift.learn.models import ModelSpec, build
 from chairlift.learn.selection import ClusterSelection, select
+from chairlift.learn.transforms import Transform, fit_apply
 from chairlift.run import events
 from chairlift.schedule.walkforward import Fold, WalkForward
 
@@ -41,6 +43,7 @@ class FitSpec:
     keep_train: bool = True  # also return in-sample predictions on training rows
     cross_section: bool = True  # False: one row per date (a single instrument); checks and IC read across time
     allow_constant: bool = False  # a rule may legitimately hold one position for a whole test year
+    transforms: tuple[Transform, ...] = added(())  # fitted on training rows, after selection and the null fill
 
 
 def in_sample_ic(frame: pl.DataFrame, pred: pl.Series, target: str, date: str, cross_section: bool = True) -> float:
@@ -79,6 +82,9 @@ def _fit_fold(
     y = tr[s.target].fill_nan(0.0).fill_null(0.0).to_numpy()
     X_tr = tr.select(inputs).fill_null(s.fill).to_numpy()
     X_te = te.select(inputs).fill_null(s.fill).to_numpy()
+    if s.transforms:
+        X_tr, X_te, cols, tinfo = fit_apply(s.transforms, X_tr, y, X_te, inputs)
+        info |= {"transforms": tinfo, "model_inputs": cols}
     m = build(s.model).fit(X_tr, y)
     p_te, p_tr = m.predict(X_te), m.predict(X_tr)
     if s.cross_section:

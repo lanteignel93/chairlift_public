@@ -44,6 +44,7 @@ machine for the same study, parameters, code versions and data.
 | [7. Experiments and sweeps](07-experiments.md) | experiment files, typed parameters, `sweep` |
 | [8. CLI reference](08-cli-reference.md) | every command and option, generated from the code |
 | [9. Studies, search and keeping score](09-studies-and-search.md) | declared studies, models and books, the ledger, the holdout gate, search, twins, unattended runs |
+| [10. API reference](10-api.md) | every public name, generated from `chairlift.__all__` |
 
 For the meaning of each output file field by field, see [how to read the outputs](../how-to-read.md); for why things
 are the way they are, [decisions](../decisions.md).
@@ -57,9 +58,12 @@ Built and tested:
 - **Monitoring:** the event stream, the live view, `watch` and `status`; static HTML reports; `submit` under
   systemd with a progress-tied watchdog; alerts.
 - **The research layer ([9](09-studies-and-search.md)):** declared studies; walk-forward folds that assert their
-  embargo, parallel per fold; ridge, LightGBM, regime rules and in-fold cluster selection; ensembles; quantile and
+  embargo, parallel per fold; ridge, LightGBM, regime rules, in-fold cluster selection and in-fold transforms (winsorize, interactions, PCA); ensembles; quantile and
   signal books; daily-book statistics with block-bootstrap intervals and concentration checks; the trial ledger,
-  deflated Sharpe and the holdout gate; search with walk-forward selection and PBO; synthetic twins.
+  deflated Sharpe and the holdout gate; search with walk-forward selection, PBO, complexity priors and one trial per
+  distinct signature; factor attribution; synthetic twins.
+- **Packaging:** a typed wheel (`py.typed`) with a lazy top-level API, installed and smoke-tested in a clean
+  environment on every push.
 
 Not built yet: point-in-time universe helpers, gates that block a holdout opening automatically, and search over
 model families beyond a study's own knobs.

@@ -51,6 +51,15 @@ nothing else.
 | `TimeSeriesBook` | a position through time | `sign_models` (rules), `short_or_flat`, `constants`, `rules` (position columns), `benchmark` (every book's paired Sharpe difference) |
 | `DailyStatsSpec` | the statistics | `periods` (252 daily, 12 monthly), block bootstrap `block`, `n_boot`, `seed` |
 
+`FitSpec(transforms=…)` adds in-fold input transforms, fitted on each fold's training rows after selection and the
+null fill, in order:
+- `Winsorize(q)` clips each input at its training q and 1 − q quantiles
+- `Interactions(top)` adds the pairwise products of the `top` inputs most correlated with the training target
+- `PCA(k, keep_inputs)` replaces or extends the inputs with k principal components
+
+A transform's choices (quantiles, chosen pairs, loadings) are as unknown to the test year as the model's weights. A
+fold's `info` records them, with the model's final input names.
+
 `RuleSpec` searches, inside each fold, one input × one training quantile × one side by the position's own
 training Sharpe. "Always in" is one of its candidates. It is the model to use when the question is "when should the
 position be on", not "what will the return be".
@@ -120,6 +129,8 @@ Options:
   candidates by past Sharpe minus their cost, so a more complex candidate has to beat the simpler ones by its cost.
   Example: `model = { gbm = 0.2, ensemble = 0.1 }`.
 - `[search] objective` judges another book than the study's ledger headline.
+- Candidates that build the same pipeline count once. A knob that does not reach it (a transform's size with no
+  transform) would otherwise add an identical trial and inflate the deflation's N. `--dry-run` marks them `= i`.
 
 Every candidate is an ordinary run, charged to the ledger. The search is then judged in three ways:
 - **Deflated Sharpe probability of the best candidate.**

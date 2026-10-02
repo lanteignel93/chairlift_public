@@ -65,6 +65,6 @@ Set `UV_LINK_MODE=copy` on this box (the uv cache is on another filesystem).
 
 ## Layout
 
-`src/chairlift/{core,data,target,features,schedule,learn,book,evaluate,diagnose,ledger,report,run,verify}` — tiers as
+`src/chairlift/{core,data,features,schedule,learn,book,evaluate,ledger,search,study,report,run,verify}` — tiers as
 on the design page. `tests/`, `debug_walkthroughs/`, `docs/` (README, decisions, how-to-read), `notebooks/`,
 `plans/{speculative,complete,archived}` (active plans at the root).

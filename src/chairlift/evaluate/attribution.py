@@ -31,6 +31,8 @@ def newey_west(X: np.ndarray, resid: np.ndarray, lags: int) -> np.ndarray:
 def factor_attribution(
     series: Mapping[str, float], factors: Mapping[str, Mapping[str, float]], periods: int = 12, lags: int = 3
 ) -> dict[str, Any]:
+    """Regress `series` on factor return series (dates in common): α per period and annualised with its Newey-West
+    t-statistic, betas and their t-statistics, R², the factors' correlation, and the Sharpe of α + residual."""
     names = list(factors)
     common = set(series)
     for f in factors.values():

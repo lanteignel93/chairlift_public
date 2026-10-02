@@ -303,11 +303,21 @@ def test_search_runs_every_candidate_charges_the_ledger_and_judges_the_search(tm
     )
     root = tmp_path / "r"
     dry = invoke("search", str(exp), "--root", str(root), "--dry-run").output
-    assert "3 candidate(s)" in dry
+    assert "3 distinct candidate(s) of 3" in dry
     out = json.loads(invoke("search", str(exp), "--root", str(root), "--json", "--jobs", "2").stdout)
     assert len(out["candidates"]) == 3 and out["deflated"]["n_trials"] == 3
     assert "selected_oos_sharpe" in out["walk_forward_selection"] and out["pbo"]["pbo"] is not None
     assert len(Ledger(root / "ledger.jsonl").trials()) == 3
+
+
+def test_search_counts_identical_candidates_once(tmp_path):
+    exp = tmp_path / "search.toml"
+    spy = Path(__file__).parents[2] / "examples" / "studies" / "spy_timing.py"
+    exp.write_text(
+        f'study = "{spy}:study"\n[search]\nsampler = "grid"\nbudget = 0\n[search.params]\nalpha = [0.1, 0.1, 10.0]\n'
+    )
+    dry = invoke("search", str(exp), "--root", str(tmp_path / "r"), "--dry-run").output
+    assert "2 distinct candidate(s) of 3" in dry and "= 0" in dry
 
 
 def _json_tail(text: str) -> dict:

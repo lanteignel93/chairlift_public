@@ -69,6 +69,8 @@ def walk_forward_selection(
 
 
 def pbo(series: Mapping[str, Mapping[str, float]], blocks: int = 10, periods: int = 252) -> dict[str, Any]:
+    """Probability of backtest overfitting (CSCV, Bailey et al. 2015): over every split of `blocks` time blocks into
+    halves, the share of splits in which the in-sample best candidate ranks at or below the median out of sample."""
     names, _, M = align(series)
     n, T = len(names), M.shape[0]
     if n < 2 or blocks * 2 > T:

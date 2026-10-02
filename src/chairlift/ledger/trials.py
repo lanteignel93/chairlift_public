@@ -6,8 +6,11 @@
                    (Sharpe and observation count) read from the stage output the study names in HEADLINE
     holdout_open   the one look: who opened it, when, and why
 
-A trial is a signature, not a run: re-running an experiment is not a new trial; changing anything that moves the
-signature is. The count of trials is what the deflated Sharpe ratio charges the best one for.
+A trial is an experiment, not a run: re-running one is not a new trial. When the study names a HEADLINE, the trial is
+the key of that stage (`trial_key`), which covers everything the judged number depends on, so adding a report or a
+diagnostic stage does not charge the same experiment again; without one, it is the run signature. A run whose
+signature or trial key was already charged is not a new trial. The count of trials is what the deflated Sharpe ratio
+charges the best one for.
 """
 
 from __future__ import annotations
@@ -48,6 +51,9 @@ def dig(obj: Any, path: str) -> Any:
 
 
 class Ledger:
+    """A study's trial ledger (JSON lines): one trial per distinct run signature, with its headline, and the holdout
+    opening, which can be recorded once."""
+
     def __init__(self, path: Path | str) -> None:
         self.path = Path(path)
 
@@ -69,11 +75,16 @@ class Ledger:
         return entry
 
     def trials(self) -> list[dict[str, Any]]:
-        seen: dict[str, dict[str, Any]] = {}
+        seen: set[str] = set()
+        out: list[dict[str, Any]] = []
         for e in self.entries():
-            if e.get("kind") == "trial" and e["signature"] not in seen:
-                seen[e["signature"]] = e
-        return list(seen.values())
+            if e.get("kind") != "trial":
+                continue
+            ids = {e["signature"], e.get("trial_key") or e["signature"]}
+            if not ids & seen:
+                out.append(e)
+            seen |= ids
+        return out
 
     def holdout_opened(self) -> dict[str, Any] | None:
         return next((e for e in self.entries() if e.get("kind") == "holdout_open"), None)
@@ -87,15 +98,18 @@ class Ledger:
         reason: str,
         headline: dict[str, Any] | None,
         sweep: dict[str, Any] | None = None,
+        trial_key: str | None = None,
     ) -> dict[str, Any] | None:
-        """Append a trial unless this signature is already one; returns the entry written, or None."""
-        if any(t["signature"] == signature for t in self.trials()):
+        """Append a trial unless its signature or trial key was already charged; returns the entry, or None."""
+        known = {i for e in self.entries() if e.get("kind") == "trial" for i in (e["signature"], e.get("trial_key"))}
+        if signature in known or (trial_key is not None and trial_key in known):
             return None
         opened = self.holdout_opened()
         return self._append(
             {
                 "kind": "trial",
                 "signature": signature,
+                "trial_key": trial_key,
                 "run_id": run_id,
                 "params": params,
                 "reason": reason,

@@ -93,7 +93,7 @@ Rules:
 
 ### Data references: aliases, so studies never contain paths
 
-A study reads `DataRef("vendor", "option_close_t5")`. The site config resolves the alias to a directory on this
+A study reads `DataRef("vendor", "option_close")`. The site config resolves the alias to a directory on this
 machine. The fingerprint is computed on content, DVC-style: a cache from (path, size, mtime_ns, inode) to a blake3
 hash of the bytes, an optimization and never the source of truth, with a Merkle hash over sorted (relpath, hash) for
 a directory. The same data on two machines therefore gets the same fingerprint, and the same signature.

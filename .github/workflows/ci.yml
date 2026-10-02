@@ -37,3 +37,15 @@ jobs:
       - run: uv python install ${{ matrix.python-version }}
       - run: uv sync --extra ml --python ${{ matrix.python-version }}
       - run: uv run --extra ml --python ${{ matrix.python-version }} pytest
+
+  package:
+    # the wheel alone, in a clean environment: what a user installing chairlift gets
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv build --out-dir dist
+      - run: uv venv /tmp/wheel -p 3.12 && uv pip install --python /tmp/wheel/bin/python dist/*.whl
+      - run: /tmp/wheel/bin/chairlift --version
+      - run: /tmp/wheel/bin/python -c "import chairlift; assert chairlift.Study and len(chairlift.__all__) > 30"
+      - run: HOME=/tmp/home /tmp/wheel/bin/chairlift run chairlift.verify.toy:pipeline --root /tmp/toy

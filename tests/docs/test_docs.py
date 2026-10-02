@@ -62,3 +62,20 @@ def test_the_example_study_runs_and_is_cached(tmp_path: Path):
     assert report.ran() == []
     out = again.load("book", report)
     assert out["days"] > 50 and abs(out["ls_sharpe"]) < 10
+
+
+def test_api_reference_is_current():
+    render = runpy.run_path(str(REPO / "scripts" / "gen_api_reference.py"))["render"]
+    assert (GUIDE / "10-api.md").read_text() == render(), (
+        "public API changed: run `uv run python scripts/gen_api_reference.py` and commit the page"
+    )
+
+
+def test_every_public_name_imports_and_is_documented():
+    import inspect
+
+    import chairlift
+
+    assert sorted(chairlift.__all__) == sorted(["__version__", *chairlift._EXPORTS])  # pyright: ignore[reportPrivateUsage]
+    undocumented = [n for n in chairlift._EXPORTS if not inspect.getdoc(getattr(chairlift, n))]
+    assert not undocumented, f"public names without a docstring: {undocumented}"
