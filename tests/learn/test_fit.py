@@ -54,8 +54,8 @@ def test_out_of_sample_predictions_cover_each_test_year_and_recover_the_signal()
     assert sorted(oos["fold"].unique().to_list()) == [2017, 2018, 2019]
     assert oos.height == P.filter(pl.col("t0").dt.year() >= 2017).height
     j = oos.join(P, on=["root", "t0"])
-    ic = j.group_by("t0").agg(ic=pl.corr("pred", "y_rank", method="spearman"))["ic"].mean()
-    assert ic > 0.15  # pyright: ignore[reportOperatorIssue]
+    ic = np.nanmean(j.group_by("t0").agg(ic=pl.corr("pred", "y_rank", method="spearman"))["ic"].to_numpy())
+    assert ic > 0.15
     assert all(i["is_ic"] > 0.15 and i["n_inputs"] == 2 for i in infos)
 
 
@@ -65,7 +65,7 @@ def test_training_rows_never_reach_past_the_embargo():
     preds, _ = fit_walk_forward(P, folds, W, ["x"], FitSpec(model=RidgeSpec()))
     tr = preds.filter(pl.col("is_train")).join(P.select("root", "t0", "exit_date"), on=["root", "t0"])
     for f in folds:
-        assert tr.filter(pl.col("fold") == f.test_year)["exit_date"].max() <= f.train_exit_cut  # pyright: ignore[reportOperatorIssue]
+        assert max(tr.filter(pl.col("fold") == f.test_year)["exit_date"].to_list()) <= f.train_exit_cut
 
 
 def test_a_constant_prediction_is_refused():
@@ -82,7 +82,7 @@ def test_zscore_ensemble_is_the_weighted_mean_of_within_date_zscores():
     e = zscore_ensemble([a, b], [0.5, 0.5])
     assert e.height == a.height
     g = e.filter(~pl.col("is_train")).group_by("t0").agg(m=pl.col("pred").mean())
-    assert g["m"].abs().max() < 1e-9  # pyright: ignore[reportOperatorIssue]
+    assert np.abs(g["m"].to_numpy()).max() < 1e-9
     with pytest.raises(AssertionError, match="same rows"):
         zscore_ensemble([a, b.head(10)], [0.5, 0.5])
 
@@ -112,4 +112,4 @@ def test_a_time_series_fits_with_one_row_per_date_and_its_ensemble_scales_by_tra
     assert all(i["is_ic"] > 0.15 for i in infos)
     e = zscore_ensemble([preds, preds], [0.5, 0.5], date="date", cross_section=False)
     tr = e.filter(pl.col("is_train")).group_by("fold").agg(m=pl.col("pred").mean(), sd=pl.col("pred").std())
-    assert tr["m"].abs().max() < 1e-9 and (tr["sd"] - 1).abs().max() < 1e-9  # pyright: ignore[reportOperatorIssue]
+    assert np.abs(tr["m"].to_numpy()).max() < 1e-9 and np.abs(tr["sd"].to_numpy() - 1).max() < 1e-9

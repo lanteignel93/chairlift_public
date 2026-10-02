@@ -350,8 +350,9 @@ def _ts_eval_stage(
         for label, bb in variants.items():
             B = signal_book(P, F, bb)
             st = daily_stats(B["pnl"].to_numpy(), B[b.date].to_list(), s.stats)
-            st["share_short"] = float((B["position"] < 0).mean())  # pyright: ignore[reportArgumentType]
-            st["mean_abs_position"] = float(B["position"].abs().mean())  # pyright: ignore[reportArgumentType]
+            pos = B["position"].to_numpy()
+            st["share_short"] = float((pos < 0).mean())
+            st["mean_abs_position"] = float(np.abs(pos).mean())
             st["daily"] = B.select(pl.col(b.date).cast(pl.String).alias("date"), "position", "pnl").to_dicts()
             out[label] = st
         out["ic"] = ts_ic_by_year(
@@ -394,7 +395,7 @@ def _ts_baselines_stage(
         books |= {n: rule_book(F, col, s.book, start, end) for n, col in rules}
         for n, B in books.items():
             st = daily_stats(B["pnl"].to_numpy(), B[s.book.date].to_list(), s.stats)
-            st["share_short"] = float((B["position"] < 0).mean())  # pyright: ignore[reportArgumentType]
+            st["share_short"] = float((B["position"].to_numpy() < 0).mean())
             st["daily"] = B.select(pl.col(s.book.date).cast(pl.String).alias("date"), "position", "pnl").to_dicts()
             out[n] = st
         return out

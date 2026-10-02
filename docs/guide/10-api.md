@@ -79,8 +79,8 @@ bump and a CHANGELOG entry. Anything else is internal, even when importable.
 
 ## `chairlift.book`
 
-- **`QuantileBook`** (class, `chairlift.book.quantile`) `(*, q: 'float' = 0.1, date: 'str' = 't0', pool_days: 'int' = 0, min_pool: 'int' = 0) -> None`  
-  QuantileBook(*, q: 'float' = 0.1, date: 'str' = 't0', pool_days: 'int' = 0, min_pool: 'int' = 0)
+- **`QuantileBook`** (class, `chairlift.book.quantile`) `(…)`  
+  QuantileBook(*, q: 'float' = 0.1, date: 'str' = 't0', pool_days: 'int' = 0, min_pool: 'int' = 0, pool_scale: "Literal['train', 'raw']" = 'train')
 - **`SignalBook`** (class, `chairlift.book.timeseries`) `(…)`  
   SignalBook(*, kind: "Literal['scaled', 'sign']" = 'scaled', cap: 'float' = 1.0, cost: 'float' = 0.0, long_only: 'bool' = False, short_only: 'bool' = False, date: 'str' = 'date', ret: 'str' = 'r_next')
 

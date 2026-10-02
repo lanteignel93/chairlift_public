@@ -332,6 +332,9 @@ on purpose, and reported what it had to work around.
   - The ensemble's standardisation follows its members (pooled fits use training moments), not the book's type.
   - The client's own calendar book can now be replaced by the built-in one. That is the test: it must give the same
     numbers.
-- **Kept open:** a fold-boundary seam in the trailing pool (for `pool_days` after each refit, the pool mixes two
-  models' prediction scales). Ranking each fold's predictions within the fold would remove it, but would rank January
-  against nothing. Documented, not fixed.
+- **The fold-boundary seam** (for `pool_days` after each refit, the pool mixed two models' prediction scales) was fixed
+  the same night, in 0.1.2. Each prediction is standardised by its fold's training-row moments, which are known at
+  the fold's start.
+  - Rejected: ranking within the fold, which ranks January against nothing.
+  - Rejected: standardising by the test year's own moments, which would be look-ahead.
+  - Measured on PEAD: worth −0.03 Sharpe on ridge, −0.02 on LightGBM, +0.003 on the ensemble (already standardised).

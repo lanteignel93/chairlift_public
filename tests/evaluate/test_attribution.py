@@ -16,7 +16,9 @@ def test_a_pure_factor_copy_has_no_alpha_and_full_beta():
     rng = np.random.default_rng(0)
     d = _dates(240)
     f = rng.normal(0.01, 0.04, 240)
-    out = factor_attribution(dict(zip(d, 0.5 * f, strict=True)), {"mom": dict(zip(d, f, strict=True))})
+    out = factor_attribution(
+        dict(zip(d, (0.5 * f).tolist(), strict=True)), {"mom": dict(zip(d, f.tolist(), strict=True))}
+    )
     assert (
         abs(out["alpha_per_period"]) < 1e-12
         and out["betas"]["mom"]["beta"] == pytest.approx(0.5)
@@ -29,7 +31,9 @@ def test_alpha_beyond_the_factor_is_found_and_significant():
     d = _dates(240)
     f = rng.normal(0.0, 0.04, 240)
     y = 0.01 + 0.3 * f + rng.normal(0, 0.02, 240)
-    out = factor_attribution(dict(zip(d, y, strict=True)), {"f": dict(zip(d, f, strict=True))}, periods=12, lags=3)
+    out = factor_attribution(
+        dict(zip(d, y.tolist(), strict=True)), {"f": dict(zip(d, f.tolist(), strict=True))}, periods=12, lags=3
+    )
     assert out["alpha_annual"] == pytest.approx(0.12, abs=0.04) and out["alpha_t"] > 4
     assert out["betas"]["f"]["beta"] == pytest.approx(0.3, abs=0.1)
 

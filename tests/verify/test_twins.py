@@ -14,7 +14,9 @@ EXAMPLES = Path(__file__).parents[2] / "examples" / "studies"
 
 
 def _ic(frame: pl.DataFrame, col: str, target: str = "y", by: str = "t0") -> float:
-    return float(frame.drop_nulls(col).group_by(by).agg(ic=pl.corr(col, target, method="spearman"))["ic"].mean())  # pyright: ignore[reportArgumentType]
+    return float(
+        frame.drop_nulls(col).group_by(by).agg(ic=pl.corr(col, target, method="spearman"))["ic"].to_numpy().mean()
+    )
 
 
 def test_cross_section_twin_plants_what_it_says():

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import polars as pl
+import pytest
 
 from chairlift.book.quantile import QuantileBook, quantile_book
 
@@ -52,3 +53,39 @@ def test_a_pool_book_keeps_the_old_hash_when_off():
 
     assert "pool_days" not in canonical(QuantileBook())
     assert canonical(QuantileBook(pool_days=91))["pool_days"] == 91
+
+
+def test_a_pool_across_a_refit_compares_standardised_predictions():
+    import datetime as dt
+
+    from chairlift.book.quantile import QuantileBook, quantile_book
+
+    # fold 2015's model predicts on a scale 100x fold 2014's; its first event shares a pool with 2014's events
+    d = [dt.date(2014, 12, 1) + dt.timedelta(days=i) for i in range(10)]
+    train = pl.DataFrame(
+        {
+            "root": [f"t{i}" for i in range(8)],
+            "t0": [dt.date(2014, 1, 1)] * 4 + [dt.date(2015, 1, 1)] * 4,
+            "pred": [-1.0, 1.0, -1.0, 1.0, -100.0, 100.0, -100.0, 100.0],
+            "fold": [2014] * 4 + [2015] * 4,
+            "is_train": [True] * 8,
+        }
+    )
+    test = pl.DataFrame(
+        {
+            "root": [f"e{i}" for i in range(10)],
+            "t0": d,
+            "pred": [-0.9, -0.5, -0.1, 0.1, 0.5, 0.9, 0.3, -0.3, 0.7, 0.0],
+            "fold": [2014] * 9 + [2015],
+            "is_train": [False] * 10,
+        }
+    )
+    frame = test.select("root", "t0", eligible=pl.lit(True))
+    test2 = test.with_columns(pred=pl.when(pl.col("fold") == 2015).then(5.0).otherwise(pl.col("pred")))
+    preds2 = pl.concat([train, test2])  # e9 (fold 2015) predicts 5.0
+    raw = quantile_book(preds2, frame, QuantileBook(pool_days=30, min_pool=5, pool_scale="raw"))
+    std = quantile_book(preds2, frame, QuantileBook(pool_days=30, min_pool=5))
+    # 5.0 is the top of 2014's raw scale, but only 0.05 sd on fold 2015's own scale: the middle of the pool
+    assert raw.filter(pl.col("root") == "e9")["pct"][0] == 1.0
+    # standardised, 2014's nine events span ±0.78 sd; 0.043 sd is above four of them
+    assert std.filter(pl.col("root") == "e9")["pct"][0] == pytest.approx(4 / 9)

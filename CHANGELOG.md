@@ -3,6 +3,15 @@
 The public API is `chairlift.__all__` ([docs/guide/10-api.md](docs/guide/10-api.md)). Until 1.0 a minor version may
 change it; every change is listed here.
 
+## 0.1.2 (2026-10-02)
+
+- **Refit seam in trailing pools fixed:** `QuantileBook(pool_scale="train")`, the default, standardises each prediction
+  by its own fold's training-row moments before pooling. A pool spanning a refit no longer compares two models'
+  prediction scales. Within a fold this changes no rank. On the PEAD client: ridge 0.33 → 0.30, LightGBM 0.20 →
+  0.18, ensemble 0.28 → 0.29, all inside their CIs. `pool_scale="raw"` keeps 0.1.1's behaviour.
+- `ty` (Astral's type checker) passes. Polars reductions in typed code go through numpy or lists, where polars types
+  every scalar as a union of all literal types.
+
 ## 0.1.1 (2026-10-02)
 
 Found by the fifth client (event-driven, pooled events):

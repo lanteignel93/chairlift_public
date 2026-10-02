@@ -35,7 +35,7 @@ def test_the_embargo_holds_and_is_checked():
     assert (table["gap_td"] >= 21).all() and table["gap_td"].min() == 21
     for f in folds:
         tr = ix.filter(f.train_mask(W))
-        assert tr["exit_date"].max() <= f.train_exit_cut < f.test_start  # pyright: ignore[reportOperatorIssue]
+        assert max(tr["exit_date"].to_list()) <= f.train_exit_cut < f.test_start
 
 
 def test_a_broken_fold_table_is_refused():
