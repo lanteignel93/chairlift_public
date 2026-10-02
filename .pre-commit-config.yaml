@@ -11,7 +11,7 @@ repos:
         name: ruff format
         entry: uv run ruff format
         language: system
-        types: [python]
+        types_or: [python, markdown]  # CI's `ruff format --check .` formats code blocks in markdown too
       - id: basedpyright
         name: basedpyright (strict on src)
         entry: uv run basedpyright

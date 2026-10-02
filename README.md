@@ -22,18 +22,23 @@ models and book; chairlift runs it so that the usual ways a backtest lies are ei
 from chairlift import CrossSectionBook, DailyStatsSpec, Ensemble, FeatureSet, FitSpec, Interactions, LightGBMSpec
 from chairlift import Model, QuantileBook, RidgeSpec, Source, Study, WalkForward
 
-def study(*, alpha: float = 1e-2, q: float = 0.1, top: int = 0) -> Study:   # keyword-only knobs: what a search varies
-    tf = (Interactions(top=top),) if top else ()                          # fitted in each fold, on training rows
+
+def study(*, alpha: float = 1e-2, q: float = 0.1, top: int = 0) -> Study:  # keyword-only knobs: what a search varies
+    tf = (Interactions(top=top),) if top else ()  # fitted in each fold, on training rows
     inputs = FeatureSet(exclude=KEYS)
     return Study(
         name="equity_ls",
-        sources=(Source("twin", twin, spec=TwinSpec(), fingerprint=lambda: "synthetic"),
-                 Source("panel", panel, inputs=("twin",)),
-                 Source("frame", frame, inputs=("twin",))),
-        index="panel",                                                      # the folds count on its dates
+        sources=(
+            Source("twin", twin, spec=TwinSpec(), fingerprint=lambda: "synthetic"),
+            Source("panel", panel, inputs=("twin",)),
+            Source("frame", frame, inputs=("twin",)),
+        ),
+        index="panel",  # the folds count on its dates
         schedule=WalkForward(start=dt.date(2012, 1, 1), first_test_year=2016, mode="expanding", embargo=1),
-        models=(Model("ridge", FitSpec(model=RidgeSpec(alpha=alpha), transforms=tf), "panel", inputs),
-                Model("gbm", FitSpec(model=LightGBMSpec(params=GBM, seeds=(0, 1, 2)), transforms=tf), "panel", inputs)),
+        models=(
+            Model("ridge", FitSpec(model=RidgeSpec(alpha=alpha), transforms=tf), "panel", inputs),
+            Model("gbm", FitSpec(model=LightGBMSpec(params=GBM, seeds=(0, 1, 2)), transforms=tf), "panel", inputs),
+        ),
         ensembles=(Ensemble("ensemble", ("ridge", "gbm")),),
         book=CrossSectionBook(spec=QuantileBook(q=q), frame="frame", paths=one_period_paths),
         stats=DailyStatsSpec(periods=12, block=3),
