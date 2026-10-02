@@ -95,11 +95,15 @@ class Model:
 
 @dataclass(frozen=True)
 class Ensemble:
-    """Z-scored member predictions, weighted (equal by default); becomes the stage `ens_<name>`."""
+    """Z-scored member predictions, weighted (equal by default); becomes the stage `ens_<name>`.
+
+    Within date when the book is a cross-section and every member was fitted cross-sectionally; otherwise by each
+    fold's training-row moments (a time series, or pooled events with a handful a day). `cross_section` overrides."""
 
     name: str
     members: tuple[str, ...]
     weights: tuple[float, ...] = ()  # default: equal
+    cross_section: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -169,7 +173,12 @@ class Study:
         for e in self.ensembles:
             weights = e.weights or tuple(1 / len(e.members) for _ in e.members)
             ins = tuple(f"fit_{x}" for x in e.members)
-            cs = isinstance(self.book, CrossSectionBook)
+            fits = {m.name: m.fit for m in self.models}
+            cs = (
+                e.cross_section
+                if e.cross_section is not None
+                else isinstance(self.book, CrossSectionBook) and all(fits[x].cross_section for x in e.members)
+            )
             out.append(Stage(f"ens_{e.name}", _ensemble_stage(ins, weights, w.entry, cs), ins))
         names = (
             list(self.evaluate)

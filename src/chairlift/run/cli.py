@@ -354,7 +354,7 @@ def show(
     pipe = b.pipe
     if stage not in pipe.stages:
         raise click.BadParameter(f"unknown stage {stage!r}; stages: {', '.join(pipe.order)}", param_hint="STAGE")
-    report = pipe.run([stage], reason=f"show {stage}", meta=b.meta(ctx))
+    report = pipe.run([stage], reason=f"show {stage}", meta=b.meta(ctx), charge=False)
     out = pipe.load(stage, report)
     if isinstance(out, pl.DataFrame):
         with pl.Config(tbl_rows=rows, tbl_cols=-1):

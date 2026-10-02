@@ -5,8 +5,8 @@ Per fold:
 - optional in-fold selection chooses the inputs on the training rows (`learn.selection`)
 - optional in-fold transforms (`learn.transforms`: winsorize, interactions, PCA) are fitted on the training rows
 - nulls are filled with `fill`, the uninformative value: 0.5 for a percentile rank, 0 for a demeaned rank
-- the prediction must vary within every test date (a constant prediction cannot rank); for a time series
-  (`cross_section=False`, one row per date) it must vary over the test period instead
+- the prediction must vary within every test date (a constant prediction cannot rank); with `cross_section=False`
+  (one instrument, or events too sparse to rank within a date) it must vary over the test period instead
 - the in-sample IC on the training rows is recorded, so |OOS − IS| can be read: the mean of within-date Spearman ICs,
   or for a time series the Spearman correlation over the training rows
 
@@ -41,7 +41,7 @@ class FitSpec:
     fill: float = 0.5
     selection: ClusterSelection | None = None
     keep_train: bool = True  # also return in-sample predictions on training rows
-    cross_section: bool = True  # False: one row per date (a single instrument); checks and IC read across time
+    cross_section: bool = True  # False: pooled rows (one instrument, or sparse events): checks and IC across rows
     allow_constant: bool = False  # a rule may legitimately hold one position for a whole test year
     transforms: tuple[Transform, ...] = added(())  # fitted on training rows, after selection and the null fill
 

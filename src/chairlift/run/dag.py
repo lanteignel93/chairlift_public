@@ -16,6 +16,7 @@ Two hashes identify work:
 
 from __future__ import annotations
 
+import contextlib
 import datetime as dt
 import functools
 import hashlib
@@ -35,7 +36,7 @@ from typing import Any, Literal, cast
 import polars as _pl
 
 from chairlift.core.identity import code_identity
-from chairlift.core.spec import SpecError, canonical, is_spec, spec_hash
+from chairlift.core.spec import SpecError, canonical, canonical_json, is_spec, spec_hash
 from chairlift.data.manifest import Manifest
 from chairlift.data.refs import StatCache, bind
 from chairlift.data.store import ArtifactStore
@@ -175,8 +176,10 @@ def code_digest(fn: Callable[..., Any]) -> str:
             # digest depend on which class the walk met first). The class source already covers what they derive from
             return
         done.add(id(code))
-        # labelled by file name, not module name: the loader names a study module differently (CLI, runpy, import)
-        key = f"{os.path.basename(code.co_filename)}:{getattr(f, '__qualname__', '')}:{code.co_firstlineno}"
+        # labelled by file name, not module name: the loader names a study module differently (CLI, runpy, import);
+        # and not by line number, so moving a function in its file does not re-key what reaches it
+        label = os.path.basename(code.co_filename)
+        key = f"{label}:{getattr(f, '__qualname__', '')}"
         try:
             seen.setdefault(key, set()).add(inspect.getsource(f))
         except (OSError, TypeError):
@@ -190,6 +193,11 @@ def code_digest(fn: Callable[..., Any]) -> str:
                 visit(target, module)
             elif isinstance(target, type) and ours(target, module):
                 visit_class(target, module)
+            elif name in g and not callable(target) and not inspect.ismodule(target):
+                # a module-level value the code reads (START = date(2011, 6, 1), a parameter table): its value is
+                # part of what the stage computes, though no function's source shows it
+                with contextlib.suppress(SpecError):  # a frame, a logger, a lock: not a value to key a result on
+                    seen.setdefault(f"{label}:global:{name}", set()).add(canonical_json(target))
         for cell in getattr(f, "__closure__", None) or ():
             try:
                 c = cell.cell_contents
@@ -419,8 +427,12 @@ class Pipeline:
         meta: Mapping[str, Any] | None = None,
         listeners: Iterable[Listener] = (),
         headline: Headline | Mapping[str, Any] | None = None,
+        charge: bool = True,
     ) -> RunReport:
         """Run the needed stages; write a run record and an event stream under <root>/runs/.
+
+        `charge=False` keeps the run out of the study's ledger: inspecting one stage (`chairlift show`) is not an
+        experiment.
 
         `meta` is caller context recorded verbatim: the study reference, the parameters, the resolved configuration.
         `listeners` receive every event as it is written (the live view); an exception in one never fails the run.
@@ -454,7 +466,8 @@ class Pipeline:
             raise
         else:
             record |= {"status": "ok"}
-            self._record_trial(report, targets, reason, meta, Headline.parse(headline))
+            if charge:
+                self._record_trial(report, targets, reason, meta, Headline.parse(headline))
             log.emit(
                 "run_finished",
                 status="ok",

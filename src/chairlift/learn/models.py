@@ -97,7 +97,12 @@ class LightGBM:
         return self
 
     def predict(self, X: np.ndarray) -> np.ndarray:
-        return np.mean(np.stack([np.asarray(m.predict(X), dtype=float) for m in self.models]), axis=0)
+        import warnings
+
+        with warnings.catch_warnings():
+            # LightGBM 4.6 names numpy columns at fit and then warns at predict that numpy has no names
+            warnings.filterwarnings("ignore", message="X does not have valid feature names")
+            return np.mean(np.stack([np.asarray(m.predict(X), dtype=float) for m in self.models]), axis=0)
 
     def describe(self) -> dict[str, Any]:
         gain = np.mean([m.booster_.feature_importance("gain") for m in self.models], axis=0)

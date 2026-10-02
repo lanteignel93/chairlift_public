@@ -49,6 +49,7 @@ def test_show_frame_and_log(tmp_path):
     assert shown.exit_code == 0 and "rows × 5 columns" in shown.output
     logged = json.loads(invoke("log", "--root", root, "--stage", "fit", "--json").output)
     assert len(logged) == 1 and logged[0]["stage"] == "fit"
+    assert Ledger(Path(root) / "ledger.jsonl").trials() == []  # looking at a stage is not an experiment
 
 
 def test_file_path_study_reference(tmp_path):

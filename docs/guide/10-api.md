@@ -15,7 +15,7 @@ bump and a CHANGELOG entry. Anything else is internal, even when importable.
   One walk-forward fit: `fit` on `features` of the source `panel`; becomes the stage `fit_<name>`.
 - **`FeatureSet`** (class, `chairlift.study.build`) `(*, columns: 'tuple[str, ...]' = (), exclude: 'tuple[str, ...]' = ()) -> None`  
   Which panel columns a model reads: `columns` if given, else every column not in `exclude`.
-- **`Ensemble`** (class, `chairlift.study.build`) `(name: 'str', members: 'tuple[str, ...]', weights: 'tuple[float, ...]' = ()) -> None`  
+- **`Ensemble`** (class, `chairlift.study.build`) `(…)`  
   Z-scored member predictions, weighted (equal by default); becomes the stage `ens_<name>`.
 - **`CrossSectionBook`** (class, `chairlift.study.build`) `(…)`  
   A quantile book among eligible names, marked by per-position P&L paths.

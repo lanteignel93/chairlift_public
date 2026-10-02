@@ -1,6 +1,7 @@
 """The rebuild rules of the design page, as tests: a change re-runs exactly the stages downstream of it."""
 
 from pathlib import Path
+from typing import Any
 
 import polars as pl
 import pytest
@@ -305,3 +306,47 @@ def test_the_code_digest_does_not_depend_on_the_hash_seed():
     assert (
         len(digest) == 64 and digest != "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     )  # not empty
+
+
+def _module_stage(tmp_path: Path, sub: str, text: str) -> Any:
+    import importlib.util
+
+    d = tmp_path / sub
+    d.mkdir()
+    (d / "study_mod.py").write_text(text)
+    spec_ = importlib.util.spec_from_file_location(f"study_mod_{sub}", d / "study_mod.py")
+    assert spec_ is not None and spec_.loader is not None
+    mod = importlib.util.module_from_spec(spec_)
+    spec_.loader.exec_module(mod)
+    return mod.stage
+
+
+def test_a_module_constant_the_stage_reads_is_part_of_the_digest(tmp_path: Path):
+    """Found by the event-driven client: `K = 1` → `K = 2` in a study module left every key unchanged."""
+    from chairlift.run.dag import code_digest
+
+    body = "import datetime as dt\n{}\n\ndef stage():\n    return K, START\n"
+    a = _module_stage(tmp_path, "a", body.format("K = 1\nSTART = dt.date(2011, 6, 1)"))
+    b = _module_stage(tmp_path, "b", body.format("K = 2\nSTART = dt.date(2011, 6, 1)"))
+    c = _module_stage(tmp_path, "c", body.format("K = 1\nSTART = dt.date(2012, 1, 1)"))
+    same = _module_stage(tmp_path, "d", body.format("K = 1\nSTART = dt.date(2011, 6, 1)"))
+    assert len({code_digest(a), code_digest(b), code_digest(c)}) == 3
+    assert code_digest(a) == code_digest(same)
+
+
+def test_moving_a_function_in_its_file_keeps_the_digest(tmp_path: Path):
+    from chairlift.run.dag import code_digest
+
+    body = "def helper():\n    return 1\n\ndef stage():\n    return helper()\n"
+    a = _module_stage(tmp_path, "a", body)
+    b = _module_stage(tmp_path, "b", "\n\n# a comment above\n\n" + body)
+    assert code_digest(a) == code_digest(b)
+
+
+def test_a_global_that_cannot_be_a_key_is_skipped(tmp_path: Path):
+    from chairlift.run.dag import code_digest
+
+    s = _module_stage(
+        tmp_path, "a", "import threading\nLOCK = threading.Lock()\n\ndef stage():\n    with LOCK:\n        return 1\n"
+    )
+    assert len(code_digest(s)) == 64
