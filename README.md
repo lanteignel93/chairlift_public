@@ -4,7 +4,7 @@
 > **This is the public copy of chairlift's development history, up to 2026-10-01.** Development
 > continues in a private repository; machine-specific paths and internal links in `plans/` and
 > `docs/` were generalized for this copy. To request access to the private repository, please email
-> [laurent.lanteigne@gmail.com](mailto:laurent.lanteigne@gmail.com).
+> laurent.lanteigne@gmail.com.
 
 A machine-learning research pipeline in which the research protocol is code: point-in-time data, a target engine with
 declared units, causal features, walk-forward folds that assert their own embargo, a holdout the loader refuses to
