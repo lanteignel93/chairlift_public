@@ -116,8 +116,9 @@ class CrossSectionBook:
 
     spec: QuantileBook
     frame: str
-    paths: Callable[[pl.DataFrame], pl.DataFrame]
+    paths: Callable[..., pl.DataFrame]
     paths_fingerprint: Callable[[], str] | None = None
+    paths_inputs: tuple[str, ...] = ()  # other stages `paths` reads: paths(book, *those outputs), e.g. a price grid
     end: Any = None
     per_position: bool = False  # Sharpe of the equal-weight spread (ls_pp) instead of the unit-per-name book
     ic_target: str = "y_rank"
@@ -195,8 +196,8 @@ class Study:
                 out.append(
                     Stage(
                         f"paths_{n}",
-                        _cs_paths_stage(f"book_{n}", b.paths),
-                        (f"book_{n}",),
+                        _cs_paths_stage(f"book_{n}", b.paths, b.paths_inputs),
+                        (f"book_{n}", *b.paths_inputs),
                         fingerprint=b.paths_fingerprint,
                     )
                 )
@@ -277,9 +278,11 @@ def _cs_book_stage(pred: str, frame: str) -> Callable[..., pl.DataFrame]:
     return book
 
 
-def _cs_paths_stage(book: str, paths: Callable[[pl.DataFrame], pl.DataFrame]) -> Callable[..., pl.DataFrame]:
-    def p(**inputs: pl.DataFrame) -> pl.DataFrame:
-        return paths(inputs[book])
+def _cs_paths_stage(
+    book: str, paths: Callable[..., pl.DataFrame], extra: tuple[str, ...] = ()
+) -> Callable[..., pl.DataFrame]:
+    def p(**inputs: Any) -> pl.DataFrame:
+        return paths(inputs[book], *(inputs[e] for e in extra))
 
     return p
 
