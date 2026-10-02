@@ -304,7 +304,7 @@ def test_search_runs_every_candidate_charges_the_ledger_and_judges_the_search(tm
     root = tmp_path / "r"
     dry = invoke("search", str(exp), "--root", str(root), "--dry-run").output
     assert "3 candidate(s)" in dry
-    out = json.loads(invoke("search", str(exp), "--root", str(root), "--json").stdout)
+    out = json.loads(invoke("search", str(exp), "--root", str(root), "--json", "--jobs", "2").stdout)
     assert len(out["candidates"]) == 3 and out["deflated"]["n_trials"] == 3
     assert "selected_oos_sharpe" in out["walk_forward_selection"] and out["pbo"]["pbo"] is not None
     assert len(Ledger(root / "ledger.jsonl").trials()) == 3

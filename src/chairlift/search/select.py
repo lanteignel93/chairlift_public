@@ -34,8 +34,12 @@ def align(series: Mapping[str, Mapping[str, float]]) -> tuple[list[str], list[st
 
 
 def walk_forward_selection(
-    series: Mapping[str, Mapping[str, float]], periods: int = 252, min_history_years: int = 1
+    series: Mapping[str, Mapping[str, float]],
+    periods: int = 252,
+    min_history_years: int = 1,
+    costs: Mapping[str, float] | None = None,
 ) -> dict[str, Any]:
+    """Each year, the candidate with the best past Sharpe net of its complexity cost; the stitched series."""
     names, dates, M = align(series)
     years = np.array([int(d[:4]) for d in dates])
     uniq = sorted(set(years.tolist()))
@@ -43,7 +47,7 @@ def walk_forward_selection(
     stitched: list[float] = []
     for y in uniq[min_history_years:]:
         past, now = years < y, years == y
-        scores = [_sharpe(M[past, j], periods) for j in range(len(names))]
+        scores = [_sharpe(M[past, j], periods) - (costs or {}).get(names[j], 0.0) for j in range(len(names))]
         j = int(np.argmax(scores))
         picks.append(
             {"year": y, "picked": names[j], "past_sharpe": scores[j], "year_sharpe": _sharpe(M[now, j], periods)}
@@ -87,12 +91,16 @@ def pbo(series: Mapping[str, Mapping[str, float]], blocks: int = 10, periods: in
 
 
 def summarize(
-    series: Mapping[str, Mapping[str, float]], sharpes: Sequence[float], n_obs: int, periods: int = 252
+    series: Mapping[str, Mapping[str, float]],
+    sharpes: Sequence[float],
+    n_obs: int,
+    periods: int = 252,
+    costs: Mapping[str, float] | None = None,
 ) -> dict[str, Any]:
     from chairlift.evaluate.deflated import deflated_sharpe
 
     return {
         "deflated": deflated_sharpe(list(sharpes), n_obs=n_obs, periods=periods),
-        "walk_forward_selection": walk_forward_selection(series, periods),
+        "walk_forward_selection": walk_forward_selection(series, periods, costs=costs),
         "pbo": pbo(series, periods=periods),
     }

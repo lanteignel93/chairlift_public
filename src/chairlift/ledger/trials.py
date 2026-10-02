@@ -18,6 +18,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from chairlift.data.locking import append_line
+
 
 @dataclass(frozen=True)
 class Headline:
@@ -63,8 +65,7 @@ class Ledger:
     def _append(self, entry: dict[str, Any]) -> dict[str, Any]:
         entry = {"at": dt.datetime.now(dt.UTC).isoformat(timespec="seconds"), **entry}
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        with self.path.open("a") as fh:
-            fh.write(json.dumps(entry, sort_keys=True, default=str) + "\n")
+        append_line(self.path, json.dumps(entry, sort_keys=True, default=str))
         return entry
 
     def trials(self) -> list[dict[str, Any]]:

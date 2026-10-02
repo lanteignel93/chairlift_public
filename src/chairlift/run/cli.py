@@ -14,6 +14,7 @@ study module's `STUDY_NAME`, or `--name`. `--root DIR` instead makes one self-co
 
 from __future__ import annotations
 
+import dataclasses
 import datetime as dt
 import importlib
 import importlib.util
@@ -452,16 +453,24 @@ def sweep(
 @name_opt
 @click.option("--reason", default="", help="Why this search (default: the file's reason).")
 @click.option("--dry-run", is_flag=True, help="List the candidates; run nothing.")
+@click.option("--jobs", default=1, show_default=True, help="Candidates run at once (spawned processes).")
 @json_opt
 @click.pass_obj
 def search(
-    ctx: Ctx, experiment: Path, root: Path | None, name: str | None, reason: str, dry_run: bool, as_json: bool
+    ctx: Ctx,
+    experiment: Path,
+    root: Path | None,
+    name: str | None,
+    reason: str,
+    dry_run: bool,
+    jobs: int,
+    as_json: bool,
 ) -> None:
     """Run every candidate of an experiment's [search] and judge the search itself: deflated Sharpe of the best,
     walk-forward selection (no hindsight), probability of backtest overfitting, robustness without the best days."""
     import datetime as _dt
 
-    from chairlift.ledger.trials import Headline, dig
+    from chairlift.ledger.trials import Headline
     from chairlift.search.select import summarize
     from chairlift.search.space import SearchError, SearchSpace
 
@@ -483,27 +492,53 @@ def search(
         click.echo(f"{len(cands)} candidate(s) · sampler {space.sampler} · seed {space.seed}")
         return
     sid = f"{_dt.datetime.now(_dt.UTC):%Y%m%dT%H%M%SZ}-{exp.digest()[:8]}"
-    rows: list[dict[str, Any]] = []
-    series: dict[str, dict[str, float]] = {}
-    for i, (c, b) in enumerate(zip(cands, built, strict=True)):
-        meta = b.meta(ctx) | {"search": {"id": sid, "candidate": i, "candidates": len(cands), "values": c}}
-        report = b.pipe.run(b.targets(()), reason=reason or exp.reason, meta=meta, headline=b.headline)
-        out = b.pipe.load(head.stage, report)
-        daily = dig(out, head.daily)
-        key = f"c{i:03d}"
-        series[key] = {str(d["date"]): float(d[head.value]) for d in daily}
-        rows.append(
-            {
-                "candidate": key,
-                "params": c,
-                "run_id": report.run_id,
-                "sharpe": float(dig(out, head.sharpe)),
-                "n_obs": int(dig(out, head.n_obs)),
-                "sharpe_without_top5": _ex_top5(list(series[key].values()), head.periods),
-            }
-        )
-        click.echo(f"  {key} sharpe {rows[-1]['sharpe']:+.3f}  {json.dumps(c, sort_keys=True)}", err=True)
-    summary = summarize(series, [r["sharpe"] for r in rows], n_obs=min(r["n_obs"] for r in rows), periods=head.periods)
+    workers = ctx.config().config.compute.workers
+    per = max(1, workers // max(1, jobs))  # fold workers per candidate: the machine's budget split between candidates
+    job_list = [
+        {
+            "experiment": str(experiment),
+            "cell": c,
+            "root": str(root) if root else None,
+            "name": name,
+            "profile": ctx.profile,
+            "reason": reason or exp.reason,
+            "search": {"id": sid, "candidate": i, "candidates": len(cands), "values": c},
+            "headline": dataclasses.asdict(head),
+            "workers": per,
+            "key": f"c{i:03d}",
+        }
+        for i, c in enumerate(cands)
+    ]
+    results: list[dict[str, Any]] = []
+    if jobs > 1:
+        import multiprocessing
+        from concurrent.futures import ProcessPoolExecutor, as_completed
+
+        with ProcessPoolExecutor(max_workers=jobs, mp_context=multiprocessing.get_context("spawn")) as pool:
+            futs = [pool.submit(_search_candidate, j) for j in job_list]
+            for fut in as_completed(futs):
+                r = fut.result()
+                results.append(r)
+                click.echo(
+                    f"  {r['candidate']} sharpe {r['sharpe']:+.3f}  {json.dumps(r['params'], sort_keys=True)}", err=True
+                )
+    else:
+        for j in job_list:
+            r = _search_candidate(j)
+            results.append(r)
+            click.echo(
+                f"  {r['candidate']} sharpe {r['sharpe']:+.3f}  {json.dumps(r['params'], sort_keys=True)}", err=True
+            )
+    results.sort(key=lambda r: r["candidate"])
+    series = {r["candidate"]: r.pop("series") for r in results}
+    rows = results
+    costs = {r["candidate"]: space.cost(r["params"]) for r in rows}
+    for r in rows:
+        r["complexity_cost"] = costs[r["candidate"]]
+    summary = summarize(
+        series, [r["sharpe"] for r in rows], n_obs=min(r["n_obs"] for r in rows), periods=head.periods, costs=costs
+    )
+    b = built[0]
     record = {"search_id": sid, "experiment": exp.record(), "space": exp.search, "candidates": rows, **summary}
     out_dir = b.root / "searches"  # pyright: ignore[reportPossiblyUnboundVariable]
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -531,6 +566,31 @@ def search(
         f" hindsight {wf['best_in_hindsight_sharpe']:+.3f} · PBO {pb.get('pbo')}"
     )
     con.print(f"search {sid} · {len(rows)} candidates · {out_dir / (sid + '.json')}")
+
+
+def _search_candidate(job: dict[str, Any]) -> dict[str, Any]:
+    """One search candidate, start to finish (module level: a spawned worker runs it)."""
+    from chairlift.ledger.trials import Headline, dig
+
+    ctx = Ctx(job["profile"])
+    root = Path(job["root"]) if job["root"] else None
+    b = _build(ctx, job["experiment"], root, (), job["name"], cell=job["cell"])
+    b.pipe.workers = job["workers"]
+    head = Headline(**job["headline"])
+    meta = b.meta(ctx) | {"search": job["search"]}
+    report = b.pipe.run(b.targets(()), reason=job["reason"], meta=meta, headline=b.headline)
+    out = b.pipe.load(head.stage, report)
+    assert head.daily is not None
+    series = {str(d["date"]): float(d[head.value]) for d in dig(out, head.daily)}
+    return {
+        "candidate": job["key"],
+        "params": job["cell"],
+        "run_id": report.run_id,
+        "sharpe": float(dig(out, head.sharpe)),
+        "n_obs": int(dig(out, head.n_obs)),
+        "sharpe_without_top5": _ex_top5(list(series.values()), head.periods),
+        "series": series,
+    }
 
 
 def _ex_top5(x: list[float], periods: int) -> float | None:

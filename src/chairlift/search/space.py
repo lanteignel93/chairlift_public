@@ -4,6 +4,8 @@
     sampler = "random"             # "grid": every combination; "random": `budget` seeded draws
     budget  = 20
     seed    = 1
+    [search.complexity]            # optional prior: the Sharpe a value must beat the simpler ones by
+    model = { gbm = 0.2, ensemble = 0.1 }
     [search.params]
     alpha  = { low = 1e-4, high = 1.0, log = true }
     window = [3, 5, 10]            # a list: choose among these
@@ -51,10 +53,15 @@ class SearchSpace:
     sampler: str = "random"
     budget: int = 20
     seed: int = 0
+    complexity: dict[str, dict[str, float]] = field(default_factory=dict[str, dict[str, float]])
+
+    def cost(self, params: Mapping[str, Any]) -> float:
+        """The Sharpe a candidate must give up for its complexity: the sum of the declared costs of its values."""
+        return float(sum(self.complexity.get(k, {}).get(str(v), 0.0) for k, v in params.items()))
 
     @staticmethod
     def parse(raw: Mapping[str, Any]) -> SearchSpace:
-        unknown = set(raw) - {"params", "sampler", "budget", "seed", "objective"}
+        unknown = set(raw) - {"params", "sampler", "budget", "seed", "objective", "complexity"}
         if unknown:
             raise SearchError(f"[search]: unknown key(s) {sorted(unknown)}")
         params: dict[str, tuple[Any, ...] | Range] = {}
@@ -80,7 +87,12 @@ class SearchSpace:
             raise SearchError("[search] sampler is 'random' or 'grid'")
         if sampler == "grid" and any(isinstance(v, Range) for v in params.values()):
             raise SearchError("[search] a grid needs lists, not ranges")
-        return SearchSpace(params, sampler, int(raw.get("budget", 20)), int(raw.get("seed", 0)))
+        complexity: dict[str, dict[str, float]] = {}
+        for k, v in dict(raw.get("complexity", {})).items():
+            if not isinstance(v, dict):
+                raise SearchError(f"[search.complexity] {k}: a table of value = cost")
+            complexity[k] = {str(a): float(b) for a, b in cast("dict[Any, Any]", v).items()}
+        return SearchSpace(params, sampler, int(raw.get("budget", 20)), int(raw.get("seed", 0)), complexity)
 
     def candidates(self) -> list[dict[str, Any]]:
         """The parameter sets to run, in order, without duplicates."""

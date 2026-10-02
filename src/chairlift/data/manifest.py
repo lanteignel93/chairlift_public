@@ -17,6 +17,8 @@ import socket
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from chairlift.data.locking import append_line
+
 
 @dataclass(frozen=True)
 class Record:
@@ -102,8 +104,7 @@ class Manifest:
             host=self.host,
         )
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        with self.path.open("a") as fh:
-            fh.write(json.dumps(asdict(rec), sort_keys=True) + "\n")
+        append_line(self.path, json.dumps(asdict(rec), sort_keys=True))
         self._by_key[key] = rec
         return rec
 

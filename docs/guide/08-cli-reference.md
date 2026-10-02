@@ -327,6 +327,7 @@ walk-forward selection (no hindsight), probability of backtest overfitting, robu
 | `--name TEXT` | Study name (default: the module's STUDY_NAME). |
 | `--reason TEXT` | Why this search (default: the file's reason). |
 | `--dry-run` | List the candidates; run nothing. |
+| `--jobs INTEGER` | Candidates run at once (spawned processes).  [default: 1] |
 | `--json` | Machine-readable output. |
 
 <a id="chairlift-show"></a>

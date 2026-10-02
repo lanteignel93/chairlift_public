@@ -27,6 +27,7 @@ from pathlib import Path
 import blake3
 
 from chairlift.core.spec import spec
+from chairlift.data.locking import append_line
 
 
 class DataError(LookupError):
@@ -167,5 +168,4 @@ class StatCache:
         self.hashed += 1
         self.directory.mkdir(parents=True, exist_ok=True)
         rec = {"path": key[0], "size": stat[0], "mtime_ns": stat[1], "inode": stat[2], "b3": digest}
-        with self.path.open("a") as fh:
-            fh.write(json.dumps(rec, sort_keys=True) + "\n")
+        append_line(self.path, json.dumps(rec, sort_keys=True))

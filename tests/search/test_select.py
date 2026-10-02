@@ -31,3 +31,10 @@ def test_pure_noise_is_overfit_and_selection_earns_nothing():
     wf = walk_forward_selection(s)
     assert abs(wf["selected_oos_sharpe"]) < 1.0 < wf["best_in_hindsight_sharpe"] + 1.0
     assert pbo(s)["pbo"] > 0.3  # the in-sample winner is a coin flip out of sample
+
+
+def test_a_complexity_cost_tips_selection_toward_the_simpler_candidate():
+    s = _series(2, {0: 0.05, 1: 0.15}, days=3000)
+    assert all(p["picked"] == "c1" for p in walk_forward_selection(s)["picks"][2:])  # c1 is better: chosen unpriced
+    priced = walk_forward_selection(s, costs={"c1": 10.0})  # a prior larger than any Sharpe gap: the simpler one wins
+    assert all(p["picked"] == "c0" for p in priced["picks"])

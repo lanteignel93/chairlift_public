@@ -39,3 +39,10 @@ def test_a_small_space_stops_at_its_distinct_points():
 def test_malformed_spaces_are_refused(raw: dict[str, object], match: str):
     with pytest.raises(SearchError, match=match):
         SearchSpace.parse(raw)
+
+
+def test_complexity_costs_sum_over_declared_values():
+    s = SearchSpace.parse(
+        {"params": {"model": ["ridge", "gbm"], "n": [1, 2]}, "complexity": {"model": {"gbm": 0.2}, "n": {"2": 0.05}}}
+    )
+    assert s.cost({"model": "gbm", "n": 2}) == 0.25 and s.cost({"model": "ridge", "n": 1}) == 0.0
