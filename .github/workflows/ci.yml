@@ -18,9 +18,8 @@ jobs:
       - run: uv run basedpyright
 
   ty:
-    # Astral's type checker is still beta: reported, never blocking
+    # Astral's type checker (beta) is clean as of 0.1.2 and blocks like basedpyright, so new errors cannot accumulate
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
