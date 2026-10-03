@@ -424,6 +424,63 @@ def spy_search(home: Path) -> dict[str, Any]:
     }
 
 
+def pead(store: ArtifactStore, home: Path) -> dict[str, Any]:
+    """Earnings events: the surprise sort timed on the 10-Q filing and on the press release, the models against it,
+    and why the models lose (training-sample ICs that do not survive)."""
+    recs = [r for r in records(home, "pead") if "cal_sue_sort" in r["results"] and not r["meta"].get("search")]
+    rel = next((r for r in reversed(recs) if r["meta"].get("params", {}).get("event") == "release"), None)
+    fil = next((r for r in reversed(recs) if r["meta"].get("params", {}).get("event", "filing") == "filing"), None)
+    if rel is None or fil is None:
+        return {}
+    fig, ax = plt.subplots(1, 2, figsize=(11, 3.6), gridspec_kw={"width_ratios": [1.6, 1]})
+    for rec, stage, label, c, ls in (
+        (fil, "cal_sue_sort", "surprise sort, entered after the 10-Q filing", MUTED, "--"),
+        (rel, "cal_sue_sort", "surprise sort, entered after the press release", INK, "-"),
+        (rel, "cal_ridge", "ridge on 7 inputs, press release", C["short"], "-"),
+    ):
+        st = load(store, rec, stage)
+        d = pl.DataFrame(st["daily"]).with_columns(pl.col("date").str.to_date())
+        ax[0].plot(
+            d["date"],
+            np.cumsum(d["ls"].to_numpy()),
+            color=c,
+            ls=ls,
+            lw=1.3,
+            label=f"{label}: Sharpe {st['ls']['sharpe']:.2f}",
+        )
+    ax[0].axhline(0, color=INK, lw=0.6)
+    ax[0].set_title("S&P 500 earnings events 2014–20: top vs bottom decile, held 60 days", fontsize=10)
+    ax[0].legend(loc="upper left", fontsize=7.5)
+    P = load(store, rel, "panel")
+    feats = ["sue", "rev_sue", "accruals", "ear_3", "pre_21", "size", "mom_12_1"]
+    tr, te = P.filter(pl.col("y_year") < 2014), P.filter(pl.col("y_year").is_between(2014, 2020))
+    ic = {
+        f: (tr.select(pl.corr(f, "y", method="spearman")).item(), te.select(pl.corr(f, "y", method="spearman")).item())
+        for f in feats
+    }
+    y = np.arange(len(feats))
+    ax[1].barh(y + 0.2, [ic[f][0] for f in feats], 0.4, color=MUTED, label="first training window (2011–13)")
+    ax[1].barh(y - 0.2, [ic[f][1] for f in feats], 0.4, color=C["ls"], label="test years (2014–20)")
+    ax[1].set_yticks(y, feats, fontsize=8)
+    ax[1].axvline(0, color=INK, lw=0.6)
+    ax[1].set_title("input IC with the 60-day return")
+    ax[1].legend(loc="upper center", bbox_to_anchor=(0.5, -0.1), ncol=1, fontsize=7, frameon=False)
+    fig.tight_layout()
+    fig.savefig(FIG / "pead.png")
+    plt.close(fig)
+    books = {k: load(store, rel, "compare")["books"][k] for k in ("sue_sort", "ridge", "gbm", "ensemble")}
+    return {
+        "release_run": rel["run_id"],
+        "filing_run": fil["run_id"],
+        "filing_sue_sort_sharpe": load(store, fil, "cal_sue_sort")["ls"]["sharpe"],
+        "release_books": {
+            k: {"sharpe": v["sharpe"], "sharpe_ci": v["sharpe_ci"], "vs_sue_sort": v["vs_sue_sort"]}
+            for k, v in books.items()
+        },
+        "ic_train_test": ic,
+    }
+
+
 def twin_search(home: Path) -> dict[str, Any]:
     srch = _searches(home, "equity_twin")
     if len(srch) < 2:
@@ -461,6 +518,7 @@ def main() -> None:
         "equity_ls": equity(store, home),
         "spy_timing": spy_timing(store, home),
         "spy_search": spy_search(home),
+        "pead": pead(store, home),
         "twin_search": twin_search(home),
     }
     (HERE / "numbers.json").write_text(json.dumps(numbers, indent=1, default=str))

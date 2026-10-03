@@ -5,6 +5,7 @@ Client studies of very different shapes, all run on the same chairlift modules (
 - **VXX**: one instrument and one row per date; timing the short-term VIX futures index.
 - **equity L/S**: S&P 500 members monthly, with fundamentals as filed.
 - **SPY timing**: one instrument, macro inputs with publication lags.
+- **PEAD**: S&P 500 earnings events, a few a day, each held 60 days.
 
 Everything here is an aggregate of a recorded run: figures, tables, and terminal transcripts. No data ships, and none
 of it is needed to read the page. `build.py` regenerates the figures and `numbers.json` from the run records under
@@ -218,6 +219,29 @@ Both real clients get in-fold transform searches: winsorize, interactions and PC
 
 That is why time-series studies with a baseline benchmark now get `active_<book>` stages, and why the SPY client's
 HEADLINE judges `active_main`.
+
+## 8. Earnings events: a weak drift, and why the models lose to a sort
+
+Post-earnings-announcement drift: after an earnings surprise, does the stock keep drifting the same way? Each
+quarter's earnings become one event, ranked against the 91 days of events before it, held 60 trading days, and marked
+against the equal-weight S&P 500. chairlift's event book (`QuantileBook(pool_days=91)`) matches the client's own
+calendar-time book to 0.0 on every day.
+
+The event can be timed two ways:
+- on the SEC filing (10-Q), a median 35 days after quarter end
+- on the earnings press release (reaction-day close), from an earnings calendar validated against prices (the
+  largest move in the week falls on the recorded reaction day 64% of the time)
+
+![PEAD](figures/pead.png)
+
+- **The drift is weak either way.** The surprise sort, no model, scores 0.45 on filings and 0.51 on releases
+  [−0.37, 1.56]: a little stronger at the release, still not distinguishable from zero.
+- **The models lose to the sort, and on releases with confidence.** Ridge scores −0.30 (Δ −0.81 [−1.73, −0.16]),
+  the ensemble −0.14 (Δ −0.66 [−1.46, −0.06]).
+- **Why:** with a few thousand training events, an IC's standard error is 0.01–0.02. The first training window's
+  ICs (grey) are mostly that size, and several flip sign in the test years (blue): revenue surprise −0.037 → +0.033.
+  The regression fits the noise; the sort uses the prior.
+- Every number comes from a run that `chairlift rerun` reproduces bit for bit. The holdout stays sealed.
 
 ## Files
 
