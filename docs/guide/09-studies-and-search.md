@@ -169,6 +169,60 @@ Every candidate is an ordinary run, charged to the ledger. The search is then ju
 On the signal twin, the search finds it and its judgment says so. On the null twin, the same search reports nothing:
 the best candidate is what 16 coin flips would produce. The record goes to `studies/<name>/searches/<id>.json`.
 
+## Power: can this study see what it is looking for?
+
+A null result means "no edge" only if the study could have seen one. Every study now has a `power` stage, shown in
+its report:
+- each feature's date-to-date IC volatility, measured on the dev panel
+- the inflation of that volatility over the independent-names level `1/√N`
+- the minimum detectable effect of the test window (`Study(power=PowerSpec(alpha, power))`, defaults 1% and 80%):
+  the smallest mean IC and the smallest annualised Sharpe the window detects
+
+Every cross-section evaluation also reports `ic_fm`: the mean per-date rank IC with its Newey-West t-statistic
+(per month for events). For a weak signal it is a better read than the decile book's Sharpe, which keeps two tails.
+
+On a real large-cap panel the IC volatility is three to four times the independent-names level, because sector and
+style moves dominate the cross-section. `examples/power/power_curves.py` measures the resulting power on twins built
+like the real panels (style factors, Student-t returns; `CrossSectionTwin(style_vol=0.012, idio_df=5)` matches the
+S&P 500 panel's IC volatility):
+
+| design | power at IC 0.02 | 0.03 | 0.05 |
+|---|---|---|---|
+| 480 names, 5 years monthly | 0.08 | 0.22 | 0.58 |
+| 480 names, 8 years monthly | 0.20 | 0.40 | 0.77 |
+| 2,500 names, 5 years monthly | 0.05 | 0.18 | 0.50 |
+| 2,500 names, 5 years weekly | 0.42 | 0.68 | 1.00 |
+
+- Large-cap anomalies live at an IC of 0.01–0.03, where a 5-year monthly test sees one about one time in ten. Its
+  null says almost nothing.
+- Breadth alone does not help when the IC noise is factor-driven: it does not shrink with more names. More dates do
+  (a weekly horizon), and so does removing the factor moves from the target (`residualize`).
+- The IC test and the decile test have about the same power here (the IC test is ahead at small effects). Both
+  false-positive rates sit at the nominal 1–2%.
+
+## Models for weak signals
+
+With a handful of inputs and an IC near 0.02, a regression fits the noise of its short training window. Two models
+start from a prior instead:
+- `CompositeSpec(signs=(("sue", 1.0), ("accruals", -1.0)), learn_signs=False)`: the equal-weight sum of the inputs,
+  standardised on the training rows, each signed by the prior. With `learn_signs`, inputs without a prior take the
+  sign of their training correlation, when it is at least `min_abs_corr`.
+- `RidgeSpec(prior=(("sue", 1.0),))`: ridge that shrinks toward the prior direction (scaled in fold) instead of
+  toward zero. At `alpha → 0` it is OLS; at large `alpha` it is the prior.
+
+`residualize(frame, "y", groups=["sector"], exposures=["beta"])` returns the target net of sector and beta on each
+date, the return a sector- and beta-neutral book earns. On the S&P 500 panel, sector neutralization cut the IC
+volatility by 15–30%.
+
+Two more defaults changed for weak signals:
+- `RuleSpec(margin="deflated")`: a regime rule must beat "always in" by the Sharpe that many noise rules would reach
+  by luck. Without the margin, some noise rule beat always-in nearly every time.
+- `WalkForward(mode="expanding")` is now the default. Use `expanding_then_rolling` only when non-stationarity is
+  shown. `embargo` counts the index's distinct dates.
+
+The deflated Sharpe of a search, and of the ledger's best trial, now uses that candidate's skewness and kurtosis.
+A short-volatility book is negatively skewed and fat-tailed, and treating it as normal overstated its DSR.
+
 ## Twins: data with a known answer
 
 `chairlift.verify.twins` generates seeded data with planted signals:

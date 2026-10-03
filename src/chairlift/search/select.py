@@ -99,10 +99,16 @@ def summarize(
     periods: int = 252,
     costs: Mapping[str, float] | None = None,
 ) -> dict[str, Any]:
-    from chairlift.evaluate.deflated import deflated_sharpe
+    from chairlift.evaluate.deflated import deflated_sharpe, moments
 
+    # the best candidate's own skewness and kurtosis enter the DSR's standard error (`series` and `sharpes` share
+    # their order)
+    names = list(series)
+    best = max(range(len(sharpes)), key=lambda i: sharpes[i]) if sharpes else 0
+    skew, kurt = moments(list(series[names[best]].values())) if names else (0.0, 3.0)
     return {
-        "deflated": deflated_sharpe(list(sharpes), n_obs=n_obs, periods=periods),
+        "deflated": deflated_sharpe(list(sharpes), n_obs=n_obs, periods=periods, skew=skew, kurt=kurt)
+        | {"best_skew": skew, "best_kurtosis": kurt},
         "walk_forward_selection": walk_forward_selection(series, periods, costs=costs),
         "pbo": pbo(series, periods=periods),
     }

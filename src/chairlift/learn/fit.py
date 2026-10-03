@@ -79,13 +79,18 @@ def _fit_fold(
     if s.selection is not None:
         inputs, table = select(tr, features, s.selection, target=s.rank_target)
         info["selection"] = table.filter(pl.col("chosen")).select("feature", "ic", "ir", "cons").to_dicts()
-    y = tr[s.target].fill_nan(0.0).fill_null(0.0).to_numpy()
+    # rows without a target carry nothing to learn: they are dropped from the fit (still predicted in-sample)
+    has_y = tr[s.target].fill_nan(None).is_not_null().to_numpy()
+    if not has_y.any():
+        raise AssertionError(f"fold {f.test_year}: no training row has a target")
+    y = tr[s.target].fill_nan(None).fill_null(0.0).to_numpy()[has_y]
     X_tr = tr.select(inputs).fill_null(s.fill).to_numpy()
     X_te = te.select(inputs).fill_null(s.fill).to_numpy()
     if s.transforms:
-        X_tr, X_te, cols, tinfo = fit_apply(s.transforms, X_tr, y, X_te, inputs)
+        X_tr, X_te, cols, tinfo = fit_apply(s.transforms, X_tr, y, X_te, inputs, fit_rows=has_y)
         info |= {"transforms": tinfo, "model_inputs": cols}
-    m = build(s.model).fit(X_tr, y)
+    names = info.get("model_inputs", inputs)
+    m = build(s.model).fit(X_tr[has_y], y, names)
     p_te, p_tr = m.predict(X_te), m.predict(X_tr)
     if s.cross_section:
         sd = te.select(w.entry).with_columns(p=pl.Series(p_te)).group_by(w.entry).agg(sd=pl.col("p").std())

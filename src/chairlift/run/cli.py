@@ -924,7 +924,14 @@ def ledger(ctx: Ctx, root: Path | None, study_name: str | None, as_json: bool) -
     dsr = None
     if scored:
         h = [t["headline"] for t in scored]
-        dsr = deflated_sharpe([x["sharpe"] for x in h], n_obs=min(x["n_obs"] for x in h), periods=h[0]["periods"])
+        top = max(h, key=lambda x: x["sharpe"])  # trials recorded before moments were kept count as normal
+        dsr = deflated_sharpe(
+            [x["sharpe"] for x in h],
+            n_obs=min(x["n_obs"] for x in h),
+            periods=h[0]["periods"],
+            skew=top.get("skew", 0.0),
+            kurt=top.get("kurtosis", 3.0),
+        )
         dsr["best_run"] = scored[dsr["best"]]["run_id"]
     opened = led.holdout_opened()
     if as_json:

@@ -18,7 +18,9 @@ def index(years: range = range(2016, 2024), hold: int = 21, names: int = 3) -> p
     return pl.DataFrame(rows, schema=["root", "t0", "exit_date", "y_year"], orient="row")
 
 
-W = WalkForward(start=dt.date(2016, 1, 4), first_test_year=2017, end=dt.date(2023, 12, 31))
+W = WalkForward(
+    start=dt.date(2016, 1, 4), first_test_year=2017, end=dt.date(2023, 12, 31), mode="expanding_then_rolling"
+)
 
 
 def test_one_fold_per_test_year_expanding_then_rolling():
@@ -63,3 +65,7 @@ def test_expanding_mode_never_rolls():
 def test_fold_json_round_trip():
     folds = make_folds(index(), W)
     assert folds_from_json(fold_table_json(folds)) == folds
+
+
+def test_the_default_is_expanding():
+    assert WalkForward(start=dt.date(2016, 1, 4), first_test_year=2017).mode == "expanding"

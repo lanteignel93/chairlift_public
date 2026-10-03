@@ -65,3 +65,16 @@ def test_spy_timing_on_the_null_twin_does_not_beat_buy_and_hold(tmp_path: Path):
     d = p.load("report", r)["books"]["ridge"]["vs_buy_and_hold"]
     assert d["d_sharpe_ci"][0] < 0 < d["d_sharpe_ci"][1]
     assert abs(p.load("eval_ridge", r)["ic"]["oos_ic_all"]) < 0.03
+
+
+def test_style_factors_make_the_ic_swing_without_moving_its_mean():
+    import dataclasses
+
+    from chairlift.evaluate.power import per_date_ic
+
+    base = CrossSectionTwin(names=400, dates=120, signals=(0.03,), sector_tilt=0.0, noise_features=1)
+    real = dataclasses.replace(base, style_vol=0.012)
+    a = per_date_ic(cross_section_twin(base), "f_sig0", "y", "t0")
+    b = per_date_ic(cross_section_twin(real), "f_sig0", "y", "t0")
+    assert b.std() > 2.5 * a.std()
+    assert abs(a.mean() - 0.03) < 0.01 and abs(b.mean() - 0.03) < 0.04  # the planted mean, within each one's noise

@@ -50,6 +50,7 @@ from chairlift.evaluate.daily import (
     paired_sharpe_diff,
     ts_ic_by_year,
 )
+from chairlift.evaluate.power import fama_macbeth_ic, mde_sharpe, power_report
 from chairlift.learn.fit import FitSpec, fit_walk_forward, zscore_ensemble
 from chairlift.run import events
 from chairlift.run.dag import Pipeline, Stage
@@ -162,6 +163,7 @@ class Study:
     evaluate: Sequence[str] | None = None  # which models / ensembles get a book (default: all)
     keys: tuple[str, ...] = ("root", "t0")
     extra: Sequence[Stage] = field(default_factory=list[Stage])
+    power: PowerSpec | None = field(default_factory=lambda: PowerSpec())  # None: no `power` stage
 
     def pipeline(self, root: Path | str) -> Pipeline:
         return Pipeline(self.stages(), root)
@@ -222,8 +224,19 @@ class Study:
             ("eval_baselines",) if isinstance(self.book, TimeSeriesBook) else ()
         )
         bench = self.book.benchmark if isinstance(self.book, TimeSeriesBook) else None
+        report_ins = evals
+        if self.power is not None:
+            if isinstance(self.book, CrossSectionBook):
+                panels: dict[str, tuple[FeatureSet, ...]] = {}
+                for m in self.models:
+                    panels[m.panel] = (*panels.get(m.panel, ()), m.features)
+                fn = _cs_power_stage(panels, self.book.ic_target, w.entry, self.book.spec.pool_days > 0)
+                out.append(Stage("power", fn, (*panels, "folds"), spec=self.power))
+            else:
+                out.append(Stage("power", _ts_power_stage(), ("folds",), spec=self.power))
+            report_ins = (*evals, "power")
         if evals:  # a study that books everything in extra stages has nothing to report here
-            out.append(Stage("report", _report_stage(evals, bench), evals, spec=self.stats))
+            out.append(Stage("report", _report_stage(evals, bench), report_ins, spec=self.stats))
         return out + list(self.extra)
 
 
@@ -315,6 +328,10 @@ def _cs_eval_stage(
             if pooled_ic
             else ic_by_year(joined, target=ic_target, date=keys[-1])
         )
+        # the most powerful read of a weak cross-sectional signal: the per-date (per-month for events) IC, its
+        # mean and Newey-West t-statistic
+        by = joined.with_columns(pl.col(keys[-1]).dt.truncate("1mo")) if pooled_ic else joined
+        out["ic_fm"] = fama_macbeth_ic(by, "pred", ic_target, keys[-1])
         out["daily"] = (
             day.with_columns(pl.col("date").cast(pl.String))
             .select("date", "long", "short", "ls", "n_long", "n_short")
@@ -403,6 +420,61 @@ def _ts_baselines_stage(
     return baselines
 
 
+@spec(name="Power", version=1)
+class PowerSpec:
+    """What the design can detect: the test window's minimum detectable IC and Sharpe (`evaluate.power`)."""
+
+    alpha: float = 0.01
+    power: float = 0.8
+
+
+def _test_window(folds: dict[str, Any]) -> tuple[dt.date, dt.date]:
+    f = folds["folds"]
+    return dt.date.fromisoformat(f[0]["test_start"]), dt.date.fromisoformat(f[-1]["test_end"])
+
+
+def _cs_power_stage(
+    panels: dict[str, tuple[FeatureSet, ...]], target: str, date: str, monthly: bool
+) -> Callable[..., dict[str, Any]]:
+    """Per-feature date-to-date IC volatility on the dev panel and the MDE of the test window; with `monthly`
+    (events, a few a day) the IC is read per calendar month."""
+
+    def power(s: PowerSpec, **inputs: Any) -> dict[str, Any]:
+        lo, hi = _test_window(inputs["folds"])
+        out: dict[str, Any] = {}
+        for panel, sets in panels.items():
+            frame: pl.DataFrame = inputs[panel]
+            features = sorted({c for fs in sets for c in fs.resolve(frame)} - {target})
+            if monthly:
+                frame = frame.with_columns(pl.col(date).dt.truncate("1mo").alias(date))
+            test = frame.filter(pl.col(date).is_between(lo, hi))
+            out[panel] = power_report(
+                frame, features, target, date, test[date].n_unique(), (hi - lo).days / 365.25, s.alpha, s.power
+            )
+        first = next(iter(out.values()))
+        events.metric("mde_ic", float(first["mde_ic"] or float("nan")))
+        events.metric("mde_sharpe", float(first["mde_sharpe"]))
+        return out
+
+    return power
+
+
+def _ts_power_stage() -> Callable[..., dict[str, Any]]:
+    def power(s: PowerSpec, folds: dict[str, Any]) -> dict[str, Any]:
+        lo, hi = _test_window(folds)
+        years = (hi - lo).days / 365.25
+        out = {
+            "test_years": years,
+            "alpha": s.alpha,
+            "power": s.power,
+            "mde_sharpe": mde_sharpe(years, s.alpha, s.power),
+        }
+        events.metric("mde_sharpe", out["mde_sharpe"])
+        return out
+
+    return power
+
+
 def _report_stage(evals: tuple[str, ...], benchmark: str | None) -> Callable[..., dict[str, Any]]:
     """Every book's headline in one table; with a benchmark, each book's paired Sharpe difference against it."""
 
@@ -436,7 +508,10 @@ def _report_stage(evals: tuple[str, ...], benchmark: str | None) -> Callable[...
                 rows[name]["vs_" + benchmark] = paired_sharpe_diff(
                     np.array([base[d] for d in common]), np.array([pnl_by_date[d] for d in common]), s
                 )
-        return {"books": rows}
+        out: dict[str, Any] = {"books": rows}
+        if "power" in inputs:
+            out["power"] = inputs["power"]
+        return out
 
     return report
 

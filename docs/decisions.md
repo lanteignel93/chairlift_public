@@ -338,3 +338,30 @@ on purpose, and reported what it had to work around.
   - Rejected: ranking within the fold, which ranks January against nothing.
   - Rejected: standardising by the test year's own moments, which would be look-ahead.
   - Measured on PEAD: worth −0.03 Sharpe on ridge, −0.02 on LightGBM, +0.003 on the ensemble (already standardised).
+
+## 2026-10-03 — 0.2.0: telling "no edge" from "cannot see"
+
+Five real studies came out null or failed out of sample. Two independent reviews and my own measurements agreed on
+the cause: the plumbing is sound, but every study was underpowered, and chairlift could not say so.
+- **Measured on the S&P 500 equity panel:** monthly IC volatility of 0.14–0.21 against 0.046 for independent
+  names. The minimum detectable mean IC in the 2015–19 window is about 0.05, while large-cap anomalies live at
+  0.01–0.03. Sector neutralization cuts the volatility 15–30% but makes nothing significant there.
+- **Measured power on matched twins:** a 5-year monthly S&P 500 test detects an IC of 0.02 8% of the time. Breadth
+  does not help when the noise is factor-driven; a weekly horizon does (42%).
+- **Hence:** a `power` stage and `ic_fm` in every study, realistic twins and a power function, `residualize`, and two
+  weak-signal models that start from a prior (`CompositeSpec`, `RidgeSpec(prior)`). PEAD's raw surprise sort
+  beating every fitted model was the symptom.
+  - Rejected: making the IC t-statistic the headline instead of the book's Sharpe. The book is what earns money,
+    and the measured power gain was small (about equal at these sizes, not the 1.6× estimated). Both are now
+    reported.
+- **Fixes the review found:** LightGBM's objective overwritten; missing targets trained as 0; DSR assuming normal
+  returns; rule learner choosing noise rules over "always in" (0 of 200 kept it). The default walk-forward becomes
+  expanding.
+- **What the review says about the problems, not the tool:**
+  - S&P 500 only, though the price data holds about 3,000 names above $300M
+  - monthly horizons where weekly would have had power
+  - VXX framed as timing Sharpe on a negatively skewed carry, where sizing plus convexity and a utility objective fit
+  - our data advantage (options) unused by the equity studies
+
+  These shape the next studies; they are not core changes.
+

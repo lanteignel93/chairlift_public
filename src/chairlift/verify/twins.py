@@ -19,7 +19,7 @@ import datetime as dt
 import numpy as np
 import polars as pl
 
-from chairlift.core.spec import spec
+from chairlift.core.spec import added, spec
 
 
 @spec(name="CrossSectionTwin", version=1)
@@ -38,6 +38,13 @@ class CrossSectionTwin:
     start: dt.date = dt.date(2012, 1, 31)
     step_days: int = 30
     seed: int = 7
+    # realism, off by default (the defaults reproduce the original twin byte for byte):
+    # style_vol: every feature (signal and noise) is also an exposure to a factor whose return is drawn each date with
+    #   this volatility, so a feature's IC swings from date to date as it does on real panels (where it runs three to
+    #   four times the independent-names level); the mean IC stays the planted one
+    # idio_df: idiosyncratic returns are Student-t with these degrees of freedom (scaled to idio_vol), not Gaussian
+    style_vol: float = added(0.0)
+    idio_df: float = added(0.0)
 
 
 def cross_section_twin(s: CrossSectionTwin) -> pl.DataFrame:
@@ -54,21 +61,34 @@ def cross_section_twin(s: CrossSectionTwin) -> pl.DataFrame:
     sect = s.sector_vol * rng.standard_normal((T, s.sectors))
     fund = rng.standard_normal((T, n))
     alpha = ((sig * np.array(s.signals)).sum(axis=2) + s.fundamental_ic * fund) * s.idio_vol
-    y = market[:, None] + sect[:, sector] + alpha + s.idio_vol * rng.standard_normal((T, n))
+    eps = rng.standard_normal((T, n))
     rows: dict[str, list[object]] = {"root": [], "t0": [], "exit_date": [], "sector": []}
     for t in range(T):
         rows["root"] += [f"N{i:03d}" for i in range(n)]
         rows["t0"] += [dates[t]] * n
         rows["exit_date"] += [dates[t + 1]] * n
         rows["sector"] += [f"S{k}" for k in sector]
-    out = pl.DataFrame(rows).with_columns(y=pl.Series(y.ravel()))
+    out = pl.DataFrame(rows)
     for k in range(K):
         out = out.with_columns(pl.Series(f"f_sig{k}", sig[:, :, k].ravel()))
-    for j in range(s.noise_features):
-        out = out.with_columns(pl.Series(f"f_noise{j}", rng.standard_normal(T * n)))
+    noise = [rng.standard_normal(T * n) for _ in range(s.noise_features)]
+    for j, v in enumerate(noise):
+        out = out.with_columns(pl.Series(f"f_noise{j}", v))
     published = np.full((T, n), np.nan)
     published[s.release_lag :] = fund[: T - s.release_lag]
+    # the realism draws come after every original draw, so turning them off leaves the original twin unchanged
+    if s.idio_df > 0:
+        chi = rng.chisquare(s.idio_df, (T, n))
+        eps = eps * np.sqrt((s.idio_df - 2) / chi) if s.idio_df > 2 else eps * np.sqrt(1 / chi)
+    y = market[:, None] + sect[:, sector] + alpha + s.idio_vol * eps
+    if s.style_vol > 0:
+        exposures = np.concatenate([sig, np.stack([v.reshape(T, n) for v in noise], axis=2)], axis=2)
+        factor = s.style_vol * rng.standard_normal((T, exposures.shape[2]))
+        y = y + (exposures * factor[:, None, :]).sum(axis=2)
+    out = out.with_columns(y=pl.Series(y.ravel()))
     out = out.with_columns(f_fund=pl.Series(published.ravel()), f_fund_peek=pl.Series(fund.ravel()))
+    first = ["root", "t0", "exit_date", "sector", "y"]  # the original column order: same bytes as before
+    out = out.select(*first, pl.exclude(first))
     return out.with_columns(y_year=pl.col("t0").dt.year()).fill_nan(None)
 
 

@@ -9,7 +9,7 @@ from __future__ import annotations
 import importlib
 from typing import TYPE_CHECKING, Any
 
-__version__ = "0.1.2"
+__version__ = "0.2.0"
 
 _EXPORTS: dict[str, str] = {
     # declaring a study
@@ -38,6 +38,7 @@ _EXPORTS: dict[str, str] = {
     "RidgeSpec": "chairlift.learn.models",
     "LightGBMSpec": "chairlift.learn.models",
     "RuleSpec": "chairlift.learn.models",
+    "CompositeSpec": "chairlift.learn.models",
     "ClusterSelection": "chairlift.learn.selection",
     "Winsorize": "chairlift.learn.transforms",
     "Interactions": "chairlift.learn.transforms",
@@ -50,6 +51,12 @@ _EXPORTS: dict[str, str] = {
     "paired_sharpe_diff": "chairlift.evaluate.daily",
     "deflated_sharpe": "chairlift.evaluate.deflated",
     "factor_attribution": "chairlift.evaluate.attribution",
+    "fama_macbeth_ic": "chairlift.evaluate.power",
+    "power_report": "chairlift.evaluate.power",
+    "mde_ic": "chairlift.evaluate.power",
+    "mde_sharpe": "chairlift.evaluate.power",
+    "PowerSpec": "chairlift.study.build",
+    "residualize": "chairlift.features.cross_section",
     # the ledger and the holdout
     "Holdout": "chairlift.ledger.holdout",
     "guard": "chairlift.ledger.holdout",
@@ -64,6 +71,7 @@ _EXPORTS: dict[str, str] = {
 __all__ = [  # literal, so type checkers see it; tests/docs checks it equals _EXPORTS
     "PCA",
     "ClusterSelection",
+    "CompositeSpec",
     "CrossSectionBook",
     "DailyStatsSpec",
     "DataRef",
@@ -76,6 +84,7 @@ __all__ = [  # literal, so type checkers see it; tests/docs checks it equals _EX
     "LightGBMSpec",
     "Model",
     "Pipeline",
+    "PowerSpec",
     "QuantileBook",
     "RidgeSpec",
     "RuleSpec",
@@ -93,12 +102,17 @@ __all__ = [  # literal, so type checkers see it; tests/docs checks it equals _EX
     "daily_stats",
     "deflated_sharpe",
     "factor_attribution",
+    "fama_macbeth_ic",
     "fingerprint_of",
     "fit_walk_forward",
     "guard",
     "make_folds",
+    "mde_ic",
+    "mde_sharpe",
     "paired_sharpe_diff",
     "pbo",
+    "power_report",
+    "residualize",
     "spec",
     "spec_hash",
     "walk_forward_selection",
@@ -127,8 +141,10 @@ if TYPE_CHECKING:
     from chairlift.evaluate.attribution import factor_attribution
     from chairlift.evaluate.daily import DailyStatsSpec, daily_stats, paired_sharpe_diff
     from chairlift.evaluate.deflated import deflated_sharpe
+    from chairlift.evaluate.power import fama_macbeth_ic, mde_ic, mde_sharpe, power_report
+    from chairlift.features.cross_section import residualize
     from chairlift.learn.fit import FitSpec, fit_walk_forward, zscore_ensemble
-    from chairlift.learn.models import LightGBMSpec, RidgeSpec, RuleSpec
+    from chairlift.learn.models import CompositeSpec, LightGBMSpec, RidgeSpec, RuleSpec
     from chairlift.learn.selection import ClusterSelection
     from chairlift.learn.transforms import PCA, Interactions, Winsorize
     from chairlift.ledger.holdout import Holdout, guard, with_holdout
@@ -142,6 +158,7 @@ if TYPE_CHECKING:
         Ensemble,
         FeatureSet,
         Model,
+        PowerSpec,
         Source,
         Study,
         TimeSeriesBook,

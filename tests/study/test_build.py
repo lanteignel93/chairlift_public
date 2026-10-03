@@ -61,7 +61,8 @@ def test_the_dag_has_one_stage_per_declared_piece():
     names = [s.name for s in cs_study().stages()]
     assert names == [
         "twin", "panel", "folds", "fit_a", "fit_b", "ens_ab",
-        "book_a", "paths_a", "eval_a", "book_b", "paths_b", "eval_b", "book_ab", "paths_ab", "eval_ab", "report",
+        "book_a", "paths_a", "eval_a", "book_b", "paths_b", "eval_b", "book_ab", "paths_ab", "eval_ab",
+        "power", "report",
     ]  # fmt: skip
 
 

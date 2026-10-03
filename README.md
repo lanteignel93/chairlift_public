@@ -166,5 +166,5 @@ config says where the alias lives, so studies never contain paths.
 - [Gallery](examples/gallery/README.md): the clients' figures and numbers, from recorded runs.
 - [How to read the outputs](docs/how-to-read.md), [decisions](docs/decisions.md), [CHANGELOG](CHANGELOG.md).
 
-Status: 0.1.2, alpha. The names in `chairlift.__all__` are the public API, documented and type-checked; everything
+Status: 0.2.0, alpha. The names in `chairlift.__all__` are the public API, documented and type-checked; everything
 else may change.

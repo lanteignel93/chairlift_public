@@ -509,6 +509,11 @@ class Pipeline:
                     "n_obs": int(dig(out, headline.n_obs)),
                     "periods": headline.periods,
                 }
+                if headline.daily is not None:
+                    from chairlift.evaluate.deflated import moments
+
+                    x = [float(d[headline.value]) for d in dig(out, headline.daily)]
+                    numbers["skew"], numbers["kurtosis"] = moments(x)
             except (KeyError, TypeError, ValueError):
                 numbers = None
         m = dict(meta or {})

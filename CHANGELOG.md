@@ -3,6 +3,35 @@
 The public API is `chairlift.__all__` ([docs/guide/10-api.md](docs/guide/10-api.md)). Until 1.0 a minor version may
 change it; every change is listed here.
 
+## 0.2.0 (2026-10-03)
+
+A review after five real studies, every one null or failed out of sample, found a pipeline that keeps results
+honest but could not tell "no edge" from "cannot see". This release adds the means to tell them apart, and models
+for weak signals.
+
+- **Power:** `evaluate.power`: `fama_macbeth_ic` (mean per-date IC, Newey-West t), `mde_ic`, `mde_sharpe`,
+  `power_report`. Every study gets a `power` stage (`Study(power=PowerSpec(...))`, `None` to turn it off), shown in
+  its report. Cross-section evaluations report `ic_fm`.
+- **Realistic twins and the power function:**
+  - `CrossSectionTwin(style_vol, idio_df)` adds date-to-date factor returns on every feature, and Student-t
+    idiosyncratic returns.
+  - `verify.power.detection_rates` / `power_curve` measure the power on them; `examples/power/power_curves.py` runs
+    the grid.
+  - The default twin is unchanged byte for byte.
+- **Weak-signal models:** `CompositeSpec` (sign-prior equal weights, optionally learned signs); `RidgeSpec(prior)`
+  (shrink toward a prior direction). Estimators receive their input names.
+- **Neutralization:** `features.cross_section.residualize` (per-date OLS on group dummies and exposures).
+- **Fixes:**
+  - LightGBM keeps a study's own `objective` (it was overwritten with L2 regression).
+  - Training rows without a target are dropped from the fit (they were trained as 0).
+  - The DSR uses the best candidate's skewness and kurtosis; ledger trials now record them.
+  - In-fold transforms fit only on rows with a target.
+- **Behaviour changes:**
+  - `RuleSpec(margin="deflated")` is the default: a rule must beat "always in" by the expected maximum Sharpe of its
+    noise candidates.
+  - `WalkForward(mode="expanding")` is the default (was `expanding_then_rolling`); slalom's client now states its
+    rolling design explicitly.
+
 ## 0.1.2 (2026-10-02)
 
 - **Refit seam in trailing pools fixed:** `QuantileBook(pool_scale="train")`, the default, standardises each prediction

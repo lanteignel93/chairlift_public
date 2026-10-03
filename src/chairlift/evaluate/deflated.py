@@ -20,6 +20,22 @@ EULER = 0.5772156649015329
 _N = NormalDist()
 
 
+def moments(x: Sequence[float]) -> tuple[float, float]:
+    """(skewness, kurtosis) of a return series, kurtosis not in excess (3 for a normal). A short-volatility book is
+    negatively skewed and fat-tailed: both widen the Sharpe ratio's standard error, and ignoring them overstates
+    the DSR."""
+    n = len(x)
+    if n < 4:
+        return 0.0, 3.0
+    m = sum(x) / n
+    m2 = sum((v - m) ** 2 for v in x) / n
+    if m2 <= 0:
+        return 0.0, 3.0
+    m3 = sum((v - m) ** 3 for v in x) / n
+    m4 = sum((v - m) ** 4 for v in x) / n
+    return m3 / m2**1.5, m4 / m2**2
+
+
 def expected_max_sharpe(n_trials: int, var_sr: float) -> float:
     if n_trials <= 1 or var_sr <= 0:
         return 0.0

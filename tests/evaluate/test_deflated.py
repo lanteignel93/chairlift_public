@@ -25,3 +25,20 @@ def test_expected_max_grows_with_trials_and_spread():
     assert expected_max_sharpe(100, 0.01) > expected_max_sharpe(10, 0.01) > 0
     assert expected_max_sharpe(10, 0.04) == pytest.approx(2 * expected_max_sharpe(10, 0.01))
     assert probabilistic_sharpe(0.0, 500) == pytest.approx(0.5)
+
+
+def test_negative_skew_and_fat_tails_lower_the_dsr():
+    import numpy as np
+
+    from chairlift.evaluate.deflated import deflated_sharpe, moments
+
+    rng = np.random.default_rng(0)
+    normal = rng.standard_normal(100_000)
+    s, k = moments(normal.tolist())
+    assert abs(s) < 0.05 and abs(k - 3) < 0.1
+    short_vol = (np.where(rng.random(5000) < 0.02, -8.0, 0.25) + 0.1 * rng.standard_normal(5000)).tolist()
+    s, k = moments(short_vol)
+    assert s < -3 and k > 15
+    flat = deflated_sharpe([1.0, 0.5, 0.2], n_obs=750)["dsr"]
+    tail = deflated_sharpe([1.0, 0.5, 0.2], n_obs=750, skew=s, kurt=k)["dsr"]
+    assert tail < flat

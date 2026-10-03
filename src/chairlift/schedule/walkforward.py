@@ -36,9 +36,10 @@ class WalkForward:
     first_test_year: int
     last_test_year: int | None = None
     end: dt.date | None = None  # last entry date of the sample (a dev end); later rows are ignored
-    mode: Mode = "expanding_then_rolling"
+    # expanding by default: with a weak signal, more history beats recency unless non-stationarity is shown
+    mode: Mode = "expanding"
     roll_years: int = 4
-    embargo: int = 21
+    embargo: int = 21  # in rows of the index's distinct dates (trading days on a daily panel, months on a monthly one)
     entry: str = "t0"
     exit: str = "exit_date"
 

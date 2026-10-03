@@ -50,7 +50,7 @@ bump and a CHANGELOG entry. Anything else is internal, even when importable.
 ## `chairlift.schedule`
 
 - **`WalkForward`** (class, `chairlift.schedule.walkforward`) `(…)`  
-  WalkForward(*, start: 'dt.date', first_test_year: 'int', last_test_year: 'int | None' = None, end: 'dt.date | None' = None, mode: 'Mode' = 'expanding_then_rolling', roll_years: 'int' = 4, embargo: 'int' = 21, entry: 'str' = 't0', exit: 'str' = 'exit_date')
+  WalkForward(*, start: 'dt.date', first_test_year: 'int', last_test_year: 'int | None' = None, end: 'dt.date | None' = None, mode: 'Mode' = 'expanding', roll_years: 'int' = 4, embargo: 'int' = 21, entry: 'str' = 't0', exit: 'str' = 'exit_date')
 - **`make_folds`** (function, `chairlift.schedule.walkforward`) `(index: 'pl.DataFrame', w: 'WalkForward') -> 'list[Fold]'`  
   `index` needs the entry and exit columns only.
 
@@ -62,12 +62,14 @@ bump and a CHANGELOG entry. Anything else is internal, even when importable.
   Every fold, in parallel when the run's compute allows (`compute.workers`); results are identical either way, because each fold sees only its own rows and they are assembled in fold order.
 - **`zscore_ensemble`** (function, `chairlift.learn.fit`) `(…)`  
   Weighted average of each member's standardised prediction; nothing is refit.
-- **`RidgeSpec`** (class, `chairlift.learn.models`) `(*, alpha: 'float' = 0.001, intercept: 'bool' = False) -> None`  
-  RidgeSpec(*, alpha: 'float' = 0.001, intercept: 'bool' = False)
+- **`RidgeSpec`** (class, `chairlift.learn.models`) `(…)`  
+  `prior`: (input, weight) pairs, a direction in standardised-input space. The penalty then shrinks the weights toward that direction (scaled by its own in-fold fit) instead of toward zero; inputs it does not name have prior weight 0.
 - **`LightGBMSpec`** (class, `chairlift.learn.models`) `(…)`  
   LightGBMSpec(*, params: 'Mapping[str, Any]', seeds: 'tuple[int, ...]' = (0,), threads: 'int' = 16, deterministic: 'bool' = True)
 - **`RuleSpec`** (class, `chairlift.learn.models`) `(…)`  
   The target `y` handed to fit() must be the return the position earns (e.g. the next period's return).
+- **`CompositeSpec`** (class, `chairlift.learn.models`) `(…)`  
+  `signs`: (input, sign) pairs, the prior. Inputs without a prior get the sign of their training correlation with the target when `learn_signs`, else are left out. `min_abs_corr`: a learned sign needs at least this |corr|.
 - **`ClusterSelection`** (class, `chairlift.learn.selection`) `(…)`  
   ClusterSelection(*, cut: 'float' = 0.6, min_cluster: 'int' = 3, tie_tol: 'float' = 0.1, singleton_ir: 'float' = 2.0, singleton_cons: 'float' = 0.75, sample: 'int' = 300000, seed: 'int' = 0, fill: 'float' = 0.5)
 - **`Winsorize`** (class, `chairlift.learn.transforms`) `(*, q: 'float' = 0.01) -> None`  
@@ -96,6 +98,24 @@ bump and a CHANGELOG entry. Anything else is internal, even when importable.
   `sharpes`: every trial's annualised Sharpe. Returns the best trial's DSR and the pieces behind it.
 - **`factor_attribution`** (function, `chairlift.evaluate.attribution`) `(…)`  
   Regress `series` on factor return series (dates in common): α per period and annualised with its Newey-West t-statistic, betas and their t-statistics, R², the factors' correlation, and the Sharpe of α + residual.
+- **`fama_macbeth_ic`** (function, `chairlift.evaluate.power`) `(…)`  
+  Mean per-date IC with its Newey-West t-statistic. `lags` ≈ the target's overlap in dates (1–3 for non-overlapping monthly returns; the horizon for overlapping ones).
+- **`power_report`** (function, `chairlift.evaluate.power`) `(…)`  
+  What this design can detect: each feature's date-to-date IC volatility on the panel, the median of them, and the MDE in IC and in Sharpe for the test window. Nothing here reads a model's predictions.
+- **`mde_ic`** (function, `chairlift.evaluate.power`) `(…)`  
+  The smallest mean IC detectable over `n_dates` with this date-to-date IC volatility.
+- **`mde_sharpe`** (function, `chairlift.evaluate.power`) `(years: 'float', alpha: 'float' = 0.01, power: 'float' = 0.8) -> 'float'`  
+  The smallest annualised Sharpe a test window of `years` detects (iid returns; fat tails need more).
+
+## `chairlift.study`
+
+- **`PowerSpec`** (class, `chairlift.study.build`) `(*, alpha: 'float' = 0.01, power: 'float' = 0.8) -> None`  
+  What the design can detect: the test window's minimum detectable IC and Sharpe (`evaluate.power`).
+
+## `chairlift.features`
+
+- **`residualize`** (function, `chairlift.features.cross_section`) `(…)`  
+  `frame` with `name` (default `<y>_resid`): on each date, `y` minus its least-squares fit on an intercept, one dummy per level of each `groups` column and the `exposures` (e.g. a beta estimated from past returns). Uses only that date's rows, so it never looks across time. Rows with a null in `y` or an exposure get a null residual; a null group is its own level.
 
 ## `chairlift.ledger`
 

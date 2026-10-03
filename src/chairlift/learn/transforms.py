@@ -94,13 +94,19 @@ def _corr(a: np.ndarray, b: np.ndarray) -> float:
 
 
 def fit_apply(
-    specs: Sequence[Transform], X_tr: np.ndarray, y: np.ndarray, X_te: np.ndarray, names: Sequence[str]
+    specs: Sequence[Transform],
+    X_tr: np.ndarray,
+    y: np.ndarray,
+    X_te: np.ndarray,
+    names: Sequence[str],
+    fit_rows: np.ndarray | None = None,
 ) -> tuple[np.ndarray, np.ndarray, list[str], list[dict[str, Any]]]:
-    """Fit each transform on the (already transformed) training matrix, in order; apply it to both matrices."""
+    """Fit each transform on the (already transformed) training matrix, in order; apply it to both matrices.
+    `fit_rows`: a mask of the training rows `y` belongs to (rows without a target are transformed, not fitted on)."""
     cols: list[str] = list(names)
     info: list[dict[str, Any]] = []
     for s in specs:
-        f = Fitted(s, X_tr, y, cols)
+        f = Fitted(s, X_tr if fit_rows is None else X_tr[fit_rows], y, cols)
         X_tr, X_te, cols = f.apply(X_tr), f.apply(X_te), f.names_out
         info.append(f.describe())
     return X_tr, X_te, cols, info
