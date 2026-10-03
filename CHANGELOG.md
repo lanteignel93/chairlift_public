@@ -20,6 +20,7 @@ for weak signals.
   - The default twin is unchanged byte for byte.
 - **Weak-signal models:** `CompositeSpec` (sign-prior equal weights, optionally learned signs); `RidgeSpec(prior)`
   (shrink toward a prior direction). Estimators receive their input names.
+- `CompositeSpec` with no signed input predicts a constant (no evidence, no tilt) instead of raising.
 - **Neutralization:** `features.cross_section.residualize` (per-date OLS on group dummies and exposures).
 - **Fixes:**
   - LightGBM keeps a study's own `objective` (it was overwritten with L2 regression).

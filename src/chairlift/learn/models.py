@@ -226,9 +226,9 @@ class Composite:
             else:
                 src = "no prior"
             self.source.append(src)
-        if not np.any(w):
-            raise ValueError("a composite with no signed input predicts a constant")
-        self.w, self.names = w / np.abs(w).sum(), list(names)
+        # no prior and no learned sign strong enough: no evidence, so no tilt (a constant prediction; a study that can
+        # live with one says so with FitSpec(allow_constant=True))
+        self.w, self.names = (w / np.abs(w).sum() if np.any(w) else w), list(names)
         return self
 
     def predict(self, X: np.ndarray) -> np.ndarray:

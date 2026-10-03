@@ -90,8 +90,8 @@ def test_a_composite_uses_prior_signs_and_learns_the_rest_only_when_asked():
     m = build(CompositeSpec(signs=(("a", 1.0),), learn_signs=True, min_abs_corr=0.05)).fit(X, y, ["a", "b", "c"])
     w = m.describe()["weights"]
     assert w["a"] == 0.5 and w["c"] == -0.5 and w["b"] == 0.0  # b's |corr| is noise, below 0.05: dropped
-    with pytest.raises(ValueError):
-        build(CompositeSpec()).fit(X, y, ["a", "b", "c"])
+    flat = build(CompositeSpec()).fit(X, y, ["a", "b", "c"])  # no evidence: no tilt
+    assert not np.any(flat.predict(X))
 
 
 def test_a_ridge_prior_pulls_the_weights_toward_its_direction():
