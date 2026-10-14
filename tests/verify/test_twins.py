@@ -78,3 +78,22 @@ def test_style_factors_make_the_ic_swing_without_moving_its_mean():
     b = per_date_ic(cross_section_twin(real), "f_sig0", "y", "t0")
     assert b.std() > 2.5 * a.std()
     assert abs(a.mean() - 0.03) < 0.01 and abs(b.mean() - 0.03) < 0.04  # the planted mean, within each one's noise
+
+
+def test_path_twin_plants_a_signal_at_entry_and_stops_cut_paths_short():
+    import numpy as np
+
+    from chairlift.verify.twins import PathTwin, path_entries, path_twin
+
+    s = PathTwin(days=400, stop=0.0)
+    tr = path_twin(s)
+    e = path_entries(tr)
+    assert e.height == 400 and (tr.group_by("t0").len()["len"] == s.hold + 1).all()
+    assert tr.filter(pl.col("date") == pl.col("t0"))["pnl"].abs().max() == 0.0  # the entry mark
+    ic = np.corrcoef(e["x_sig"].to_numpy(), e["y"].to_numpy())[0, 1]
+    assert ic > 0.3  # E[y | x] = hold · (premium + β · vol · x)
+    stopped = path_entries(path_twin(PathTwin(days=400, stop=2.0)))
+    assert (
+        stopped["stopped"].any()
+        and (stopped.filter("stopped")["exit_date"] < stopped.filter("stopped")["expiry"]).all()
+    )

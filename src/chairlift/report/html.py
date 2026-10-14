@@ -99,7 +99,8 @@ def run_report(rec_path: Path, ledger_path: Path | None = None, headline: dict[s
         led = Ledger(ledger_path)
         opened = led.holdout_opened()
         gate = f"OPEN since {opened['at']} ({opened['reason']})" if opened else "sealed"
-        parts.append(f"<h2>Ledger</h2><p>{len(led.trials())} trial(s) · holdout {_e(gate)}</p>")
+        books = f" · {len(led.books())} judged book(s)" if led.books() else ""
+        parts.append(f"<h2>Ledger</h2><p>{len(led.trials())} trial(s){_e(books)} · holdout {_e(gate)}</p>")
     params = rec.get("meta", {}).get("params", {})
     if params:
         parts.append("<h2>Parameters</h2>" + _table(["name", "value"], [[k, json.dumps(v)] for k, v in params.items()]))

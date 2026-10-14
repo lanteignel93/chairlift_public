@@ -4,6 +4,8 @@ Every twin is a pure function of its spec (seeded), so it is also a cacheable so
 
     cross_section_twin   names × dates; forward returns from a market factor, sector factors and planted signals
     time_series_twin     one instrument; a daily return with planted predictability from lagged states
+    path_twin            one trade entered a day, marked daily to its horizon or its stop; a planted signal at entry
+                         moves each trade's drift (`path_entries` gives one row per trade)
 
 The cross-section twin also carries a release-lag trap: a fundamental `g` that moves the forward return but is only
 published `release_lag` dates after its value date. `f_fund` is what a careful study sees at t0 (the latest
@@ -130,3 +132,62 @@ def time_series_twin(s: TimeSeriesTwin) -> pl.DataFrame:
     return out.with_columns(
         y=pl.col("r_next"), exit_date=pl.col("date").shift(-1), y_year=pl.col("date").dt.year()
     ).drop_nulls("exit_date")
+
+
+@spec(name="PathTwin", version=1)
+class PathTwin:
+    days: int = 1500  # business days with an entry (one trade a day)
+    hold: int = 21  # business days from entry to the trade's horizon
+    beta: float = 0.15  # the signal's loading on each trade's daily P&L, in units of the daily volatility
+    common: float = 0.5  # the share of daily volatility common to every live trade (a market day)
+    noise_features: int = 3
+    vol: float = 1.0  # daily P&L volatility of one unit
+    premium: float = 0.05  # the mean daily P&L of one unit (a carry every trade earns)
+    stop: float = 0.0  # exit at the first mark below −stop (0: every trade held to its horizon)
+    start: dt.date = dt.date(2014, 1, 2)
+    seed: int = 5
+
+
+def path_twin(s: PathTwin) -> pl.DataFrame:
+    """One row per (trade, date): the trade's cumulative P&L per unit (`pnl`, 0 at the entry mark), its horizon
+    (`expiry`), its exit date and whether a stop ended it, and the inputs known at entry (`x_sig`, `x_noise<j>`)."""
+    rng = np.random.default_rng(s.seed)
+    days: list[dt.date] = []
+    d = s.start
+    while len(days) < s.days + s.hold + 1:
+        if d.weekday() < 5:
+            days.append(d)
+        d += dt.timedelta(days=1)
+    market = rng.standard_normal(len(days))
+    x = rng.standard_normal(s.days)
+    noise = rng.standard_normal((s.days, s.noise_features))
+    own = np.sqrt(max(1e-9, 1 - s.common**2 - s.beta**2))
+    cols: dict[str, list[object]] = {k: [] for k in ("t0", "date", "pnl", "expiry", "exit_date", "stopped")}
+    feats: dict[str, list[float]] = {"x_sig": [], **{f"x_noise{j}": [] for j in range(s.noise_features)}}
+    for i in range(s.days):
+        steps = s.premium + s.vol * (s.beta * x[i] + s.common * market[i + 1 : i + 1 + s.hold])
+        steps = steps + s.vol * own * rng.standard_normal(s.hold)
+        path = np.concatenate([[0.0], np.cumsum(steps)])
+        end = s.hold
+        if s.stop > 0:
+            hit = np.flatnonzero(path < -s.stop)
+            end = int(hit[0]) if len(hit) else s.hold
+        n = end + 1
+        cols["t0"] += [days[i]] * n
+        cols["date"] += days[i : i + n]
+        cols["pnl"] += path[:n].tolist()
+        cols["expiry"] += [days[i + s.hold]] * n
+        cols["exit_date"] += [days[i + end]] * n
+        cols["stopped"] += [end < s.hold] * n
+        feats["x_sig"] += [float(x[i])] * n
+        for j in range(s.noise_features):
+            feats[f"x_noise{j}"] += [float(noise[i, j])] * n
+    return pl.DataFrame(cols | feats)
+
+
+def path_entries(trades: pl.DataFrame) -> pl.DataFrame:
+    """One row per trade of a path twin: its inputs, horizon, exit and outcome `y` (the P&L at its last mark)."""
+    inputs = [c for c in trades.columns if c.startswith("x_")]
+    first = [pl.col(c).first() for c in ("expiry", "exit_date", "stopped", *inputs)]
+    out = trades.sort("t0", "date").group_by("t0", maintain_order=True).agg(*first, y=pl.col("pnl").last())
+    return out.with_columns(y_year=pl.col("t0").dt.year())

@@ -169,3 +169,85 @@ def test_feature_sets_resolve_explicit_columns_or_exclusions():
     assert FeatureSet(exclude=("k",)).resolve(f) == ["a", "b"]
     with pytest.raises(KeyError, match="zz"):
         FeatureSet(columns=("zz",)).resolve(f)
+
+
+def test_a_fit_keeps_each_fold_s_model_and_the_report_reads_their_stability(tmp_path: Path):
+    p = cs_study().pipeline(tmp_path)
+    r = p.run()
+    models = p.load("fit_a.models", r)
+    assert [m["test_year"] for m in models] == [f["test_year"] for f in p.load("folds", r)["folds"]]
+    assert all(m["model"]["kind"] == "ridge" and len(m["model"]["coef_standardised"]) == m["n_inputs"] for m in models)
+    st = p.load("report", r)["models"]
+    assert set(st) == {"a", "b"} and st["a"]["folds"] == len(models)
+
+
+# ---- path-marked trades: a path book judged on its gain over constant size -------------------------------------------
+
+
+def _path_study(alpha: float = 1e-2, drop_day: bool = False) -> Study:
+    from chairlift.book.path import PathSizing
+    from chairlift.study.build import PathBook
+    from chairlift.verify.twins import PathTwin, path_entries, path_twin
+
+    def trades(twin: pl.DataFrame) -> pl.DataFrame:
+        return twin.select("t0", "date", "pnl", "expiry")
+
+    def calendar(twin: pl.DataFrame) -> pl.DataFrame:
+        cal = twin.select("date").unique().sort("date")
+        return cal.filter(pl.col("date") != dt.date(2017, 3, 15)) if drop_day else cal
+
+    def panel(twin: pl.DataFrame) -> pl.DataFrame:
+        return path_entries(twin).with_columns(w_half=pl.lit(0.5))
+
+    feats = FeatureSet(columns=("x_sig", "x_noise0", "x_noise1", "x_noise2"))
+    fit = FitSpec(model=RidgeSpec(alpha=alpha, intercept=True), target="y", rank_target="y", cross_section=False)
+    return Study(
+        name="paths",
+        sources=(
+            Source("twin", path_twin, spec=PathTwin(days=1300), fingerprint=lambda: "s"),
+            Source("trades", trades, inputs=("twin",)),
+            Source("calendar", calendar, inputs=("twin",)),
+            Source("panel", panel, inputs=("twin",)),
+        ),
+        index="panel",
+        schedule=WalkForward(start=dt.date(2014, 1, 1), first_test_year=2016, embargo=21),
+        keys=("t0",),
+        models=(Model("ridge", fit, "panel", feats),),
+        book=PathBook(
+            sizing=PathSizing(rule="rank"),
+            trades="trades",
+            calendar="calendar",
+            frame="panel",
+            baselines=(("half", "w_half"),),
+            flag="stopped",
+        ),
+        stats=DailyStatsSpec(n_boot=200),
+        power=None,
+    )
+
+
+def test_a_path_book_sizes_on_the_signal_and_is_judged_on_its_gain(tmp_path: Path):
+    from chairlift.ledger.trials import Ledger
+
+    p = _path_study().pipeline(tmp_path)
+    r = p.run()
+    ev = p.load("eval_ridge", r)
+    assert {"book", "constant", "half", "vs_constant", "vs_half", "active", "sizing"} <= set(ev)
+    assert ev["vs_constant"]["d_sharpe"] > 0 and ev["sizing"]["oos_rank_ic"] > 0.2  # the planted signal, sized
+    assert ev["book"]["n_days"] == ev["constant"]["n_days"] == ev["active"]["n_days"]  # one calendar for all
+    assert abs(ev["half"]["sharpe"] - ev["constant"]["sharpe"]) < 1e-9  # half size, same Sharpe
+    per = p.load("eval_ridge.trades", r)
+    assert per.columns == ["t0", "pred", "w", "y", "stopped"] and abs(per["w"].mean() - 1.0) < 0.15
+    rep = p.load("report", r)["books"]
+    assert {"ridge", "ridge_active", "constant", "half"} <= set(rep)
+    books = Ledger(tmp_path / "ledger.jsonl").books()
+    assert [(b["stage"], b["family"]) for b in books] == [("eval_ridge", "gain over constant")]
+    assert books[0]["headline"]["sharpe"] == ev["active"]["sharpe"]
+    _path_study().pipeline(tmp_path).run()  # the same book again: not a new one
+    _path_study(alpha=1.0).pipeline(tmp_path).run()  # another penalty: another book
+    assert len(Ledger(tmp_path / "ledger.jsonl").books()) == 2
+
+
+def test_a_path_book_refuses_a_calendar_that_misses_a_pnl_day(tmp_path: Path):
+    with pytest.raises(ValueError, match="not on the trading calendar"):
+        _path_study(drop_day=True).pipeline(tmp_path).run()

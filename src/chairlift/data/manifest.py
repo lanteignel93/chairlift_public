@@ -14,7 +14,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 import socket
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 from chairlift.data.locking import append_line
@@ -32,6 +32,7 @@ class Record:
     reason: str
     built_at: str
     host: str = ""
+    side: dict[str, str] = field(default_factory=dict[str, str])  # a stage's side outputs (name → reference)
 
 
 class Manifest:
@@ -90,6 +91,7 @@ class Manifest:
         output: str,
         code: str,
         reason: str,
+        side: dict[str, str] | None = None,
     ) -> Record:
         rec = Record(
             stage=stage,
@@ -102,9 +104,13 @@ class Manifest:
             reason=reason,
             built_at=dt.datetime.now(dt.UTC).isoformat(timespec="microseconds"),
             host=self.host,
+            side=dict(sorted((side or {}).items())),
         )
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        append_line(self.path, json.dumps(asdict(rec), sort_keys=True))
+        line = asdict(rec)
+        if not line["side"]:
+            del line["side"]  # a record without side outputs reads as it always did
+        append_line(self.path, json.dumps(line, sort_keys=True))
         self._by_key[key] = rec
         return rec
 

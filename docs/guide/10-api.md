@@ -21,11 +21,15 @@ bump and a CHANGELOG entry. Anything else is internal, even when importable.
   A quantile book among eligible names, marked by per-position P&L paths.
 - **`TimeSeriesBook`** (class, `chairlift.study.build`) `(…)`  
   A position through time from a prediction (or a rule), against constant and rule baselines.
+- **`PathBook`** (class, `chairlift.study.build`) `(…)`  
+  Overlapping trades marked along their paths, each sized by its model's prediction at entry, against baselines on the same entries (`book.path`). The gain over `benchmark` is what the study is judged on.
 
 ## `chairlift.run`
 
 - **`Stage`** (class, `chairlift.run.dag`) `(…)`  
   One node: `fn(spec?, *inputs)` with its identity (spec hash, version, captured values, code digest, input keys, and for a source its data fingerprint). A change to any of them re-keys the stage and everything downstream.
+- **`Outputs`** (class, `chairlift.run.dag`) `(value: 'Any', **side: 'Any') -> 'None'`  
+  What a stage with side outputs returns: its main output, and each declared side output by name.
 - **`Pipeline`** (class, `chairlift.run.dag`) `(…)`  
   A DAG of stages over a content-addressed store: `plan` says what would rebuild, `run` builds what is missing and records the run (signature, manifest, ledger trial, events), `load` reads a stage's output.
 
@@ -85,6 +89,8 @@ bump and a CHANGELOG entry. Anything else is internal, even when importable.
   QuantileBook(*, q: 'float' = 0.1, date: 'str' = 't0', pool_days: 'int' = 0, min_pool: 'int' = 0, pool_scale: "Literal['train', 'raw']" = 'train')
 - **`SignalBook`** (class, `chairlift.book.timeseries`) `(…)`  
   SignalBook(*, kind: "Literal['scaled', 'sign']" = 'scaled', cap: 'float' = 1.0, cost: 'float' = 0.0, long_only: 'bool' = False, short_only: 'bool' = False, date: 'str' = 'date', ret: 'str' = 'r_next')
+- **`PathSizing`** (class, `chairlift.book.path`) `(…)`  
+  PathSizing(*, rule: 'Rule' = 'rank', entry: 'str' = 't0', date: 'str' = 'date', pnl: 'str' = 'pnl', unit: 'str | None' = None, scale: 'float' = 1.0, cap: 'float' = 2.0)
 
 ## `chairlift.evaluate`
 
@@ -119,14 +125,16 @@ bump and a CHANGELOG entry. Anything else is internal, even when importable.
 
 ## `chairlift.ledger`
 
-- **`Holdout`** (class, `chairlift.ledger.holdout`) `(*, start: 'dt.date', column: 'str' = 't0') -> None`  
-  Holdout(*, start: 'dt.date', column: 'str' = 't0')
+- **`Holdout`** (class, `chairlift.ledger.holdout`) `(…)`  
+  Holdout(*, start: 'dt.date', column: 'str' = 't0', horizon: 'str | None' = None, early_exit: 'bool' = False)
 - **`guard`** (function, `chairlift.ledger.holdout`) `(frame: 'pl.DataFrame', h: 'Holdout') -> 'pl.DataFrame'`  
-  The frame without its holdout rows, unless the ledger records the opening.
+  The frame without its holdout rows, unless the ledger records the opening; with a horizon, never the rows that straddle the seal.
 - **`with_holdout`** (function, `chairlift.ledger.holdout`) `(fingerprint: 'Callable[[], str]') -> 'Callable[[], str]'`  
   A source fingerprint that also changes when the holdout is opened.
 - **`Ledger`** (class, `chairlift.ledger.trials`) `(path: 'Path | str') -> 'None'`  
   A study's trial ledger (JSON lines): one trial per distinct run signature, with its headline, and the holdout opening, which can be recorded once.
+- **`Headline`** (class, `chairlift.ledger.trials`) `(…)`  
+  Where a run's headline numbers live: a stage whose output is a JSON dict, and dotted paths into it.
 
 ## `chairlift.search`
 

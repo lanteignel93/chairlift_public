@@ -350,3 +350,72 @@ def test_a_global_that_cannot_be_a_key_is_skipped(tmp_path: Path):
         tmp_path, "a", "import threading\nLOCK = threading.Lock()\n\ndef stage():\n    with LOCK:\n        return 1\n"
     )
     assert len(code_digest(s)) == 64
+
+
+# ---- side outputs: a stage's second product, stored and keyed with it -----------------------------------------------
+
+
+def _side_pipe(tmp_path: Path, calls: list[str], scale: float = 1.0) -> Pipeline:
+    from chairlift.run.dag import Outputs
+
+    def fit() -> Outputs:
+        calls.append("fit")
+        return Outputs(RAW.with_columns(p=pl.col("x") * scale), models=[{"fold": 1, "coef": scale}])
+
+    def use(**inputs: Any) -> dict[str, float]:
+        calls.append("use")
+        return {"coef": inputs["fit.models"][0]["coef"], "n": float(inputs["fit"].height)}
+
+    return Pipeline(
+        [
+            Stage("fit", fit, fingerprint=lambda: "v", side=("models",), ignore=("calls",)),
+            Stage("use", use, ("fit.models", "fit"), ignore=("calls",)),
+        ],
+        tmp_path,
+    )
+
+
+def test_a_side_output_is_stored_read_downstream_and_reused_with_its_stage(tmp_path: Path):
+    calls: list[str] = []
+    p = _side_pipe(tmp_path, calls)
+    r = p.run()
+    assert p.load("fit.models", r) == [{"fold": 1, "coef": 1.0}] and p.load("use", r) == {"coef": 1.0, "n": 10.0}
+    assert r.results["fit"].side["models"].startswith("json:")
+    again = _side_pipe(tmp_path, calls).run()
+    assert again.ran() == [] and calls == ["fit", "use"]
+    assert again.results["fit"].side == r.results["fit"].side  # a hit hands its side outputs on
+
+
+def test_a_lost_side_output_rebuilds_its_stage(tmp_path: Path):
+    calls: list[str] = []
+    r = _side_pipe(tmp_path, calls).run()
+    kind, _, digest = r.results["fit"].side["models"].partition(":")
+    (tmp_path / "store" / "objects" / digest[:2] / f"{digest}.{kind}").unlink()
+    assert "fit" in _side_pipe(tmp_path, calls).run().ran()
+
+
+def test_a_stage_must_return_exactly_the_side_outputs_it_declares(tmp_path: Path):
+    from chairlift.run.dag import Outputs
+
+    with pytest.raises(TypeError, match="declares side outputs"):
+        Pipeline([Stage("s", lambda: RAW, fingerprint=lambda: "v", side=("models",))], tmp_path / "a").run()
+    with pytest.raises(TypeError, match="declares side outputs"):
+        Pipeline([Stage("s", lambda: Outputs(RAW, extra=1), fingerprint=lambda: "v")], tmp_path / "b").run()
+
+
+def test_an_input_may_only_name_a_declared_side_output(tmp_path: Path):
+    with pytest.raises(KeyError, match="side output"):
+        Pipeline([Stage("a", lambda: RAW, fingerprint=lambda: "v"), Stage("b", lambda **_: 1, ("a.models",))], tmp_path)
+    with pytest.raises(ValueError, match="identifiers"):
+        Stage("a.b", lambda: RAW)
+
+
+def _raw() -> pl.DataFrame:
+    return RAW
+
+
+def test_declaring_a_side_output_re_keys_the_stage_and_nothing_else_does():
+    plain = Stage("s", _raw, fingerprint=lambda: "v")
+    sided = Stage("s", _raw, fingerprint=lambda: "v", side=("models",))
+    assert plain.key({}, "fp") != sided.key({}, "fp") and plain.plan_key({}, "fp") != sided.plan_key({}, "fp")
+    assert plain.key({}, "fp") == Stage("s", _raw, fingerprint=lambda: "v").key({}, "fp")

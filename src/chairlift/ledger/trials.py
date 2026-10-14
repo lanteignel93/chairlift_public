@@ -4,6 +4,9 @@
 
     trial          a run with a new signature: its run id, parameters, sweep cell, reason, and the headline numbers
                    (Sharpe and observation count) read from the stage output the study names in HEADLINE
+    book           a judged book: one per distinct book (its stage key and where its number is read), whichever run
+                   built or reused it, with its family (what the number judges: a gain over a baseline, a
+                   long-short spread) and its numbers
     holdout_open   the one look: who opened it, when, and why
 
 A trial is an experiment, not a run: re-running one is not a new trial. When the study names a HEADLINE, the trial is
@@ -11,6 +14,10 @@ the key of that stage (`trial_key`), which covers everything the judged number d
 diagnostic stage does not charge the same experiment again; without one, it is the run signature. A run whose
 signature or trial key was already charged is not a new trial. The count of trials is what the deflated Sharpe ratio
 charges the best one for.
+
+A run evaluates several books (every model, every sizing rule, every framing), and the honest count is the books, not
+the runs: a run's headline is one of many numbers that could have been reported. Book entries carry that count; a
+deflated statistic compares like with like, so books are deflated within their family.
 """
 
 from __future__ import annotations
@@ -34,6 +41,7 @@ class Headline:
     periods: int = 252  # observations per year (de-annualises the Sharpe)
     daily: str | None = None  # dotted path to the daily series (a list of {date, ...}); a search needs it
     value: str = "pnl"  # the field of each daily row that is the P&L
+    family: str | None = None  # what the number judges ("gain over constant"): books deflate within their family
 
     @staticmethod
     def parse(raw: Any) -> Headline | None:
@@ -85,6 +93,44 @@ class Ledger:
                 out.append(e)
             seen |= ids
         return out
+
+    def books(self) -> list[dict[str, Any]]:
+        """Every judged book, once each, in the order first charged."""
+        seen: set[str] = set()
+        out: list[dict[str, Any]] = []
+        for e in self.entries():
+            if e.get("kind") == "book" and e["book_key"] not in seen:
+                seen.add(e["book_key"])
+                out.append(e)
+        return out
+
+    def record_book(
+        self,
+        *,
+        book_key: str,
+        stage: str,
+        family: str | None,
+        run_id: str,
+        params: dict[str, Any],
+        reason: str,
+        headline: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        """Append a judged book unless it was already charged; returns the entry, or None."""
+        if any(e.get("kind") == "book" and e.get("book_key") == book_key for e in self.entries()):
+            return None
+        return self._append(
+            {
+                "kind": "book",
+                "book_key": book_key,
+                "stage": stage,
+                "family": family,
+                "run_id": run_id,
+                "params": params,
+                "reason": reason,
+                "headline": headline,
+                "after_holdout_open": self.holdout_opened() is not None,
+            }
+        )
 
     def holdout_opened(self) -> dict[str, Any] | None:
         return next((e for e in self.entries() if e.get("kind") == "holdout_open"), None)

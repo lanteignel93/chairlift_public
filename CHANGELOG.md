@@ -3,6 +3,38 @@
 The public API is `chairlift.__all__` ([docs/guide/10-api.md](docs/guide/10-api.md)). Until 1.0 a minor version may
 change it; every change is listed here.
 
+## Unreleased (0.3.0)
+
+Overlapping trades marked along their paths (an option seller's book) become a first-class study shape, judged on its
+gain over a baseline, with honest counts. Built from what the mogul client had to work around (plan
+`plans/chairlift-path-books-and-honest-counting.md`).
+
+- **Outcome-free seals:** `Holdout(horizon=..., early_exit=...)`.
+  - Dev is the rows final before the seal, holdout is the rows entered from it, and the rows that straddle it are in
+    neither (counted in the run's events).
+  - With `early_exit=True` and no horizon, `guard` refuses: an exit-date seal would select on the outcome.
+  - Existing seals keep their identity.
+- **Side outputs:** `Stage(side=(...))` and `Outputs(value, **side)`.
+  - Stored and keyed with their stage, read downstream as `<stage>.<name>`, shown by `chairlift show`.
+  - `rerun` and `compare` cover them.
+- **Kept models:** every `fit_<model>` keeps each fold's description as `fit_<model>.models` (`learn.fit.fold_models`).
+  The report adds a stability table per model (`learn.fit.stability`: per input, folds, mean weight, sign agreement).
+- **Path books:** `PathBook` (study piece) and `PathSizing` (spec): `book.path.sizes`, `daily_pnl`, `on_calendar`,
+  `final_pnl`.
+  - Books are marked on a declared calendar and refuse a P&L day it lacks.
+  - Each evaluation holds the book, its baselines, the paired differences and the active series against the
+    benchmark, with the per-trade table as a side output.
+- **Every judged book counts:**
+  - The ledger records `book` entries, one per distinct judged book, with a family.
+  - `Study.judged_books()` derives them for every declared book, and `Study(judged=...)` adds extra-stage books.
+  - `chairlift ledger` deflates each family over its own count.
+  - `Headline` gains `family` and is exported.
+- **`verify.twins.PathTwin` / `path_twin` / `path_entries`:** daily trades with a planted entry signal and optional
+  stops.
+- **Behaviour changes:**
+  - Every fit and report stage re-keys once (their code changed): the first run after upgrading refits.
+  - Run records and manifest lines carry `side` when a stage has side outputs.
+
 ## 0.2.0 (2026-10-03)
 
 A review after five real studies, every one null or failed out of sample, found a pipeline that keeps results

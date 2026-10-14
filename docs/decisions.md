@@ -365,3 +365,25 @@ the cause: the plumbing is sound, but every study was underpowered, and chairlif
 
   These shape the next studies; they are not core changes.
 
+
+## 2026-10-14 — path books, kept models, honest counts, outcome-free seals
+
+Laurent's go (mogul log M-522) on the plan `plans/chairlift-path-books-and-honest-counting.md`, written from what the
+mogul client worked around. The plan's proposals answer its open questions:
+- chairlift never prices options
+- the public copy waits for one reviewed batch
+- straddling rows join neither window
+
+- **Seals.** `Holdout.horizon` and `early_exit` (added fields: existing seals keep their hash).
+  - *Rejected:* sealing on the entry date alone. A trade entered before the seal would read holdout-period marks
+    while counted as dev.
+- **Side outputs**, so a fit keeps its fold models without a second code path.
+  - *Rejected:* a separate models stage, which refits (twice the compute).
+  - *Rejected:* a dict as the fit's output, which breaks every consumer of a fit.
+- **The path book** in the core, with the mogul and strangle clients' books as the reference implementations.
+  - Its first mark charges the P&L from entry to that mark, so a cost paid at entry lands on the entry day.
+  - The calendar is a declared source, and a P&L day it lacks is an error (mogul M-486, M-513).
+- **Counting:** one ledger entry per distinct judged book, with a family, deflated within the family. The gain is
+  judged on the active series (book minus benchmark), as timing books already are.
+  - *Rejected:* deflating the paired Sharpe difference directly. The formula's √(T−1) scaling assumes one series's
+    Sharpe, and the difference's standard error depends on the two books' correlation.

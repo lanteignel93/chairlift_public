@@ -19,6 +19,9 @@ Stages it builds, by name:
   cross-section)
 - for a time series, `eval_baselines`, and `active_<name>` when the benchmark is a baseline: the book's return minus
   the benchmark's, the series to judge when the benchmark itself earns a premium
+- for path-marked trades (`PathBook`), `eval_<name>`: the model-sized book, every baseline on the same entries, the
+  paired difference against each, and the active series against the benchmark; its side output `trades` holds each
+  trade's prediction, weight and outcome
 - `report`: every evaluation's headline numbers side by side
 - any `extra` stages the study adds (a replication check, a diagnostic)
 
@@ -38,6 +41,7 @@ from typing import Any, Literal, cast
 import numpy as np
 import polars as pl
 
+from chairlift.book.path import PathSizing, daily_pnl, on_calendar, sizes
 from chairlift.book.quantile import QuantileBook, quantile_book
 from chairlift.book.timeseries import SignalBook, constant_book, rule_book, signal_book
 from chairlift.core.spec import spec
@@ -51,9 +55,10 @@ from chairlift.evaluate.daily import (
     ts_ic_by_year,
 )
 from chairlift.evaluate.power import fama_macbeth_ic, mde_sharpe, power_report
-from chairlift.learn.fit import FitSpec, fit_walk_forward, zscore_ensemble
+from chairlift.learn.fit import FitSpec, fit_walk_forward, fold_models, stability, zscore_ensemble
+from chairlift.ledger.trials import Headline
 from chairlift.run import events
-from chairlift.run.dag import Pipeline, Stage
+from chairlift.run.dag import Outputs, Pipeline, Stage
 from chairlift.schedule.walkforward import WalkForward, check_folds, fold_table_json, folds_from_json, make_folds
 
 
@@ -147,6 +152,26 @@ class TimeSeriesBook:
     ic_target: str = "y"
 
 
+@dataclass(frozen=True)
+class PathBook:
+    """Overlapping trades marked along their paths, each sized by its model's prediction at entry, against baselines
+    on the same entries (`book.path`). The gain over `benchmark` is what the study is judged on.
+
+    `trades`: the source with one row per (trade, date) and the trade's cumulative P&L per unit. `calendar`: the
+    source of trading days (one `date` column) every book is marked on. `frame`: the source with one row per trade
+    (the panel), holding the outcome, the baselines' weight columns and the optional `flag`.
+    """
+
+    sizing: PathSizing
+    trades: str
+    calendar: str
+    frame: str
+    baselines: tuple[tuple[str, str], ...] = ()  # (book name, weight column in frame); `constant` (w = 1) always runs
+    benchmark: str = "constant"  # each book's active series is its P&L minus this book's
+    outcome: str = "y"  # the trade's outcome in frame, for the IC and the sizing diagnostics
+    flag: str | None = None  # a boolean column in frame (stopped, say): the mean weight of the flagged trades
+
+
 @dataclass
 class Study:
     """A whole study, declared: sources, the index the folds count on, the walk-forward schedule, models, ensembles,
@@ -157,23 +182,59 @@ class Study:
     index: str
     schedule: WalkForward
     models: Sequence[Model]
-    book: CrossSectionBook | TimeSeriesBook
+    book: CrossSectionBook | TimeSeriesBook | PathBook
     stats: DailyStatsSpec
     ensembles: Sequence[Ensemble] = ()
     evaluate: Sequence[str] | None = None  # which models / ensembles get a book (default: all)
     keys: tuple[str, ...] = ("root", "t0")
     extra: Sequence[Stage] = field(default_factory=list[Stage])
     power: PowerSpec | None = field(default_factory=lambda: PowerSpec())  # None: no `power` stage
+    judged: Sequence[Headline] = ()  # books in extra stages that count as trials, beside the declared book's
 
     def pipeline(self, root: Path | str) -> Pipeline:
-        return Pipeline(self.stages(), root)
+        p = Pipeline(self.stages(), root)
+        p.judged = self.judged_books()
+        return p
+
+    def _evaluated(self) -> list[str]:
+        if self.evaluate is not None:
+            return list(self.evaluate)
+        return [*(m.name for m in self.models), *(e.name for e in self.ensembles)]
+
+    def judged_books(self) -> tuple[Headline, ...]:
+        """Every book this study judges, each a trial in the ledger: one per evaluated model and ensemble, read where
+        the study's book puts its verdict, and any `judged` books of extra stages."""
+        names = self._evaluated()
+        b = self.book
+        out: list[Headline] = []
+        if isinstance(b, PathBook):
+            fam = f"gain over {b.benchmark}"
+            out += [
+                Headline(f"eval_{n}", "active.sharpe", "active.n_days", self.stats.periods, "active.daily", "pnl", fam)
+                for n in names
+            ]
+        elif isinstance(b, CrossSectionBook):
+            out += [
+                Headline(f"eval_{n}", "ls.sharpe", "ls.n_days", self.stats.periods, "daily", "ls", "long-short")
+                for n in names
+            ]
+        elif b.benchmark in {c for c, _ in b.constants} | {r for r, _ in b.rules}:
+            fam = f"active over {b.benchmark}"
+            out += [Headline(f"active_{n}", "sharpe", "n_days", self.stats.periods, "daily", "pnl", fam) for n in names]
+        else:
+            out += [
+                Headline(f"eval_{n}", "book.sharpe", "book.n_days", self.stats.periods, "book.daily", "pnl", "book")
+                for n in names
+            ]
+        return (*out, *self.judged)
 
     def stages(self) -> list[Stage]:
         w, keys = self.schedule, self.keys
         out: list[Stage] = [Stage(s.name, s.fn, s.inputs, spec=s.spec, fingerprint=s.fingerprint) for s in self.sources]
         out.append(Stage("folds", _folds_stage(self.index, keys), (self.index,), spec=w))
         for m in self.models:
-            out.append(Stage(f"fit_{m.name}", _fit_stage(m.panel, w, keys, m.features), (m.panel, "folds"), spec=m.fit))
+            fit = _fit_stage(m.panel, w, keys, m.features)
+            out.append(Stage(f"fit_{m.name}", fit, (m.panel, "folds"), spec=m.fit, side=("models",)))
         for e in self.ensembles:
             weights = e.weights or tuple(1 / len(e.members) for _ in e.members)
             ins = tuple(f"fit_{x}" for x in e.members)
@@ -184,13 +245,17 @@ class Study:
                 else isinstance(self.book, CrossSectionBook) and all(fits[x].cross_section for x in e.members)
             )
             out.append(Stage(f"ens_{e.name}", _ensemble_stage(ins, weights, w.entry, cs), ins))
-        names = (
-            list(self.evaluate)
-            if self.evaluate is not None
-            else [*(m.name for m in self.models), *(e.name for e in self.ensembles)]
-        )
+        names = self._evaluated()
         pred_stage = {m.name: f"fit_{m.name}" for m in self.models} | {e.name: f"ens_{e.name}" for e in self.ensembles}
-        if isinstance(self.book, CrossSectionBook):
+        if isinstance(self.book, PathBook):
+            b = self.book
+            for n in names:
+                p = pred_stage[n]
+                ins = (b.trades, b.calendar, b.frame, p)
+                spec_ = _PathEval(stats=self.stats, sizing=b.sizing)
+                fn = _path_eval_stage(p, b.trades, b.calendar, b.frame, b.baselines, b.benchmark, b.outcome, b.flag)
+                out.append(Stage(f"eval_{n}", fn, ins, spec=spec_, side=("trades",)))
+        elif isinstance(self.book, CrossSectionBook):
             b = self.book
             for n in names:
                 p, fr = pred_stage[n], b.frame_of(n)
@@ -223,7 +288,7 @@ class Study:
         evals = tuple(f"eval_{n}" for n in names) + (
             ("eval_baselines",) if isinstance(self.book, TimeSeriesBook) else ()
         )
-        bench = self.book.benchmark if isinstance(self.book, TimeSeriesBook) else None
+        bench = self.book.benchmark if isinstance(self.book, TimeSeriesBook | PathBook) else None
         report_ins = evals
         if self.power is not None:
             if isinstance(self.book, CrossSectionBook):
@@ -236,6 +301,7 @@ class Study:
                 out.append(Stage("power", _ts_power_stage(), ("folds",), spec=self.power))
             report_ins = (*evals, "power")
         if evals:  # a study that books everything in extra stages has nothing to report here
+            report_ins = (*report_ins, *(f"fit_{m.name}.models" for m in self.models))
             out.append(Stage("report", _report_stage(evals, bench), report_ins, spec=self.stats))
         return out + list(self.extra)
 
@@ -244,6 +310,12 @@ class Study:
 class _TsEval:
     stats: DailyStatsSpec
     book: SignalBook
+
+
+@spec(name="PathEvaluation", version=1)
+class _PathEval:
+    stats: DailyStatsSpec
+    sizing: PathSizing
 
 
 # ---- stage functions: each a closure over specs and functions only, so captured-value hashing covers it -------------
@@ -259,15 +331,17 @@ def _folds_stage(index: str, keys: tuple[str, ...]) -> Callable[..., dict[str, A
     return folds
 
 
-def _fit_stage(panel: str, w: WalkForward, keys: tuple[str, ...], features: FeatureSet) -> Callable[..., pl.DataFrame]:
-    def fit(s: FitSpec, **inputs: Any) -> pl.DataFrame:
+def _fit_stage(panel: str, w: WalkForward, keys: tuple[str, ...], features: FeatureSet) -> Callable[..., Outputs]:
+    """The predictions, and as the side output `models` each fold's description (`fit_<name>.models`)."""
+
+    def fit(s: FitSpec, **inputs: Any) -> Outputs:
         frame = inputs[panel]
         preds, infos = fit_walk_forward(
             frame, folds_from_json(inputs["folds"]["folds"]), w, features.resolve(frame), s, keys=keys
         )
         for i in infos:
             events.metric("test_rows", float(i["test_rows"]), fold=i["test_year"])
-        return preds
+        return Outputs(preds, models=fold_models(infos))
 
     return fit
 
@@ -381,6 +455,83 @@ def _ts_eval_stage(
     return evaluate
 
 
+def _path_stats(d: pl.DataFrame, s: DailyStatsSpec) -> dict[str, Any]:
+    st = daily_stats(d["pnl"].to_numpy(), d["date"].to_list(), s)
+    st["daily"] = [{"date": str(a), "pnl": float(x)} for a, x in zip(d["date"], d["pnl"], strict=True)]
+    return st
+
+
+def _spearman(a: np.ndarray, b: np.ndarray) -> float | None:
+    if len(a) < 3 or a.std() == 0 or b.std() == 0:
+        return None
+    ra, rb = pl.Series(a).rank().to_numpy(), pl.Series(b).rank().to_numpy()
+    return float(np.corrcoef(ra, rb)[0, 1])
+
+
+def _path_eval_stage(
+    pred: str,
+    trades_n: str,
+    calendar_n: str,
+    frame_n: str,
+    baselines: tuple[tuple[str, str], ...],
+    benchmark: str,
+    outcome: str,
+    flag: str | None,
+) -> Callable[..., Outputs]:
+    def evaluate(s: _PathEval, **inputs: pl.DataFrame) -> Outputs:
+        z = s.sizing
+        trades, cal, frame = inputs[trades_n], inputs[calendar_n], inputs[frame_n]
+        sz = sizes(inputs[pred], z)
+        lo, hi = sz[z.entry].min(), sz[z.entry].max()
+        if not (isinstance(lo, dt.date) and isinstance(hi, dt.date)):
+            raise AssertionError(f"{pred}: no out-of-sample predictions to size")
+        ents = frame.filter(pl.col(z.entry).is_between(lo, hi))
+        weights = {"constant": ents.select(z.entry, w=pl.lit(1.0))}
+        weights |= {n: ents.select(z.entry, w=pl.col(c).cast(pl.Float64)) for n, c in baselines}
+        if benchmark not in weights:
+            raise KeyError(f"benchmark {benchmark!r} is not a baseline: {sorted(weights)}")
+        raw = {"book": daily_pnl(trades, sz, z)} | {n: daily_pnl(trades, w, z) for n, w in weights.items()}
+        end = max(cast("dt.date", x["date"].max()) for x in raw.values() if x.height)
+        books = {k: on_calendar(v, cal, lo, end) for k, v in raw.items()}
+        out: dict[str, Any] = {k: _path_stats(v, s.stats) for k, v in books.items()}
+        x = books["book"]["pnl"].to_numpy()
+        for n in weights:
+            out[f"vs_{n}"] = paired_sharpe_diff(books[n]["pnl"].to_numpy(), x, s.stats)
+        active = books["book"].with_columns(pnl=pl.Series(x - books[benchmark]["pnl"].to_numpy()))
+        out["active"] = _path_stats(active, s.stats) | {"benchmark": benchmark}
+        keep = [z.entry, outcome, *([flag] if flag else [])]
+        per = sz.join(frame.select(keep), on=z.entry, how="left").sort(z.entry)
+        w, y, pr = per["w"].to_numpy(), per[outcome].to_numpy().astype(float), per["pred"].to_numpy()
+        years = per[z.entry].dt.year().to_numpy()
+        out["sizing"] = {
+            "n_entries": per.height,
+            "mean_w": float(w.mean()),
+            "corr_w_y": float(np.corrcoef(w, y)[0, 1]) if w.std() > 0 and y.std() > 0 else None,
+            "oos_rank_ic": _spearman(pr, y),
+            "oos_rank_ic_by_year": {int(v): _spearman(pr[years == v], y[years == v]) for v in np.unique(years)},
+        }
+        if flag:
+            f = per[flag].fill_null(False).to_numpy().astype(bool)
+            out["sizing"]["mean_w_flagged"] = float(w[f].mean()) if f.any() else None
+            out["sizing"]["share_flagged"] = float(f.mean())
+        events.metric("sharpe", out["book"]["sharpe"])
+        events.metric("gain", out[f"vs_{benchmark}"]["d_sharpe"])
+        return Outputs(_finite_json(out), trades=per)
+
+    return evaluate
+
+
+def _finite_json(x: Any) -> Any:
+    """A stage output is plain JSON: a non-finite number (a book flat for a whole year) becomes null."""
+    if isinstance(x, dict):
+        return {k: _finite_json(v) for k, v in cast("dict[str, Any]", x).items()}
+    if isinstance(x, list):
+        return [_finite_json(v) for v in cast("list[Any]", x)]
+    if isinstance(x, float) and not np.isfinite(x):
+        return None
+    return x
+
+
 def _ts_active_stage(ev: str, benchmark: str) -> Callable[..., dict[str, Any]]:
     """A book's return minus the benchmark's, day by day: what a search should judge when the benchmark itself earns
     a premium (a long-only timing book is mostly the market; its own Sharpe says little about the timing)."""
@@ -483,6 +634,14 @@ def _report_stage(evals: tuple[str, ...], benchmark: str | None) -> Callable[...
         series: dict[str, dict[str, float]] = {}
         for ev in evals:
             res = inputs[ev]
+            if "active" in res and "book" in res:  # a path book: the model's book, its gain, the baselines once
+                n = ev.removeprefix("eval_")
+                rows[n] = _headline(res["book"]) | {f"vs_{benchmark}": res.get(f"vs_{benchmark}")}
+                rows[f"{n}_active"] = _headline(res["active"])
+                for label, raw in res.items():
+                    if label not in ("book", "active", "sizing") and not label.startswith("vs_") and label not in rows:
+                        rows[label] = _headline(raw)
+                continue
             if "ls" in res:  # a cross-section evaluation
                 rows[ev.removeprefix("eval_")] = _headline(res["ls"])
                 series[ev.removeprefix("eval_")] = {d["date"]: d["ls"] for d in res["daily"]}
@@ -499,7 +658,7 @@ def _report_stage(evals: tuple[str, ...], benchmark: str | None) -> Callable[...
                 rows[name] = _headline(st)
                 daily: list[dict[str, Any]] = st["daily"]
                 series[name] = {d["date"]: d["pnl"] for d in daily}
-        if benchmark and benchmark in series:
+        if benchmark and benchmark in series and not any("active" in inputs[ev] for ev in evals):
             base = series[benchmark]
             for name, pnl_by_date in series.items():
                 common = sorted(set(base) & set(pnl_by_date))
@@ -511,6 +670,9 @@ def _report_stage(evals: tuple[str, ...], benchmark: str | None) -> Callable[...
         out: dict[str, Any] = {"books": rows}
         if "power" in inputs:
             out["power"] = inputs["power"]
+        fits = {k.removeprefix("fit_").removesuffix(".models"): v for k, v in inputs.items() if k.endswith(".models")}
+        if fits:  # how stable each model's weights are across folds
+            out["models"] = {n: stability(cast("list[dict[str, Any]]", v)) for n, v in sorted(fits.items())}
         return out
 
     return report

@@ -81,6 +81,39 @@ position be on", not "what will the return be".
 Folds run in parallel when `[compute] workers` > 1 (spawned processes). The result is identical, bit for bit, to
 the serial run.
 
+## Path books: overlapping trades, sized by a model
+
+An option seller enters a trade every day and holds it for weeks, to expiry or to a stop, marked daily. The book for
+that shape is `PathBook`. Each model's out-of-sample prediction sizes its trade at entry, and every book is marked on
+the study's trading calendar:
+
+```python
+book = PathBook(
+    sizing=PathSizing(rule="rank", entry="t0", pnl="pnl", unit="size", scale=100.0),
+    trades="trades",  # one row per (trade, date): cumulative P&L per unit since entry
+    calendar="calendar",  # every trading day the books are marked on
+    frame="panel",  # one row per trade: the outcome, the baseline weights, the flag
+    baselines=(("gated", "w_gated"),),
+    benchmark="constant",
+    outcome="y",
+    flag="stopped",
+)
+```
+
+- **The rules:**
+  - `rank` sizes 2 × the prediction's percentile among every earlier prediction, so the mean size stays near 1 and
+    only timing can win.
+  - `tercile`, `inverse` (a risk forecast) and `direct` (the prediction is the position) are the alternatives.
+  - `constant` is one unit.
+- **What each `eval_<model>` holds:**
+  - the sized book and every baseline on the same entries, with `constant` always present
+  - the paired Sharpe difference against each baseline
+  - the active series against the benchmark, which the ledger judges
+  - how the sizing behaves
+- **The side output `eval_<model>.trades`** holds each trade's prediction, weight and outcome.
+- **A P&L day missing from the calendar is an error.** A book marked on its active days only drops a gated book's
+  flat days and overstates its Sharpe.
+
 ## The ledger: every experiment is a trial
 
 Every run is charged to `studies/<name>/ledger.jsonl`. A new signature is a new trial; a re-run of the same
@@ -105,6 +138,17 @@ The output lists every trial, then the best Sharpe, the expected maximum of that
 **deflated Sharpe probability** (Bailey and López de Prado). That probability says how likely the best is to be real,
 given how many were tried. Treat a best trial below about 0.95 as luck until shown otherwise.
 
+**Every judged book counts.** A run evaluates many books: each model, each sizing rule, each framing. Its headline is
+one of them. A declared study also records every book it judges, once per distinct book (its stage key and where its
+number is read), with its family, which says what the number judges:
+- `gain over constant` for a path book
+- `long-short` for a cross-section
+- `active over always_short` for a timing book with a baseline benchmark
+
+`chairlift ledger` deflates each family over its own count. Books built in extra stages count when the study lists
+them: `Study(judged=(Headline(stage, sharpe, n_obs, periods, daily, value, family), ...))`. The headline trials stay
+as they were, so a ledger written before books were counted keeps its meaning.
+
 ## The holdout gate: one look, on the record
 
 A source reads its rows through `guard(frame, Holdout(start=…, column=…))` and declares
@@ -121,6 +165,22 @@ stage behind it re-keys: no result built on sealed data is ever mixed up with on
 
 Gate on the *outcome* date, not the entry date. A row entered on 2023-12-28 whose 5-day target ends in January is a
 holdout row (VXX's panel seals on `outcome_end`).
+
+That works when every row ends on a fixed horizon. When a row can end early (a stop), its exit date depends on how it
+turned out. Sealing on it keeps the stopped rows that straddle the seal in dev and seals their held siblings. Declare
+the horizon instead:
+
+```python
+Holdout(start=dt.date(2024, 1, 1), column="t0", horizon="expiry", early_exit=True)
+```
+
+- **Dev:** rows whose horizon is before `start`.
+- **Holdout:** rows entered on or after `start`.
+- **Neither:** rows entered before `start` into a later horizon. They are dropped in both states, and their count is
+  a metric in the run's events (`holdout_straddling_rows`).
+
+Both dates are known at entry, so the windows do not depend on any outcome. `early_exit=True` makes the gate refuse a
+seal without a horizon.
 
 ## Search: many experiments, judged without hindsight
 

@@ -113,3 +113,20 @@ def test_a_time_series_fits_with_one_row_per_date_and_its_ensemble_scales_by_tra
     e = zscore_ensemble([preds, preds], [0.5, 0.5], date="date", cross_section=False)
     tr = e.filter(pl.col("is_train")).group_by("fold").agg(m=pl.col("pred").mean(), sd=pl.col("pred").std())
     assert np.abs(tr["m"].to_numpy()).max() < 1e-9 and np.abs(tr["sd"].to_numpy() - 1).max() < 1e-9
+
+
+def test_each_fold_s_model_is_kept_as_plain_json_and_its_stability_read():
+    import json
+
+    from chairlift.learn.fit import fold_models, stability
+
+    p = panel(ic=0.3)
+    _, infos = fit_walk_forward(p, make_folds(p, W), W, ["x", "noise"], FitSpec(model=RidgeSpec(alpha=1e-2)))
+    models = fold_models([*infos, {"test_year": 0, "is_ic": float("nan"), "model": {"kind": "none"}}])
+    json.dumps(models, allow_nan=False)  # what the store needs
+    assert [m["test_year"] for m in models[:-1]] == [f["test_year"] for f in infos] and models[-1]["is_ic"] is None
+    st = stability(models[:-1])
+    assert st["kind"] == "ridge" and st["folds"] == len(infos)
+    top = next(iter(st["inputs"]))
+    assert top == "x" and st["inputs"]["x"]["sign_agreement"] == 1.0  # the planted signal keeps its sign every fold
+    assert all(r["folds"] == len(infos) for r in st["inputs"].values())

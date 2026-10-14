@@ -7,6 +7,10 @@ manifest holds that key and the store holds the object, and otherwise runs the s
 A stage with no inputs reads the outside world, so it must say how to fingerprint what it reads. Without a
 fingerprint it is volatile and runs every time: the runner never assumes external data is unchanged.
 
+A stage may also emit named side outputs (`Stage.side`; the function returns `Outputs(value, name=...)`): a fit's
+fold models beside its predictions. Each is stored under its own content hash, recorded with the stage's key, and read
+downstream as the input `<stage>.<name>`; it is rebuilt exactly when the stage is.
+
 Two hashes identify work:
 - a stage's *key* includes the references of its inputs' actual outputs: it decides reuse, after upstream has run;
 - a stage's *plan key* includes its inputs' plan keys instead: a Merkle hash of the pipeline's definition (names,
@@ -24,6 +28,7 @@ import inspect
 import json
 import os
 import platform
+import re
 import resource
 import socket
 import time
@@ -213,6 +218,24 @@ def code_digest(fn: Callable[..., Any]) -> str:
     return hashlib.sha256(body.encode()).hexdigest()
 
 
+class Outputs:
+    """What a stage with side outputs returns: its main output, and each declared side output by name."""
+
+    __slots__ = ("side", "value")
+
+    def __init__(self, value: Any, **side: Any) -> None:
+        self.value = value
+        self.side = side
+
+
+def parent(ref: str) -> str:
+    """The stage an input reference names: `fit_ridge.models` → `fit_ridge`."""
+    return ref.split(".", 1)[0]
+
+
+_SIDE_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
 @dataclass(frozen=True)
 class Stage:
     """One node: `fn(spec?, *inputs)` with its identity (spec hash, version, captured values, code digest, input keys,
@@ -225,10 +248,14 @@ class Stage:
     version: int = 1
     fingerprint: Callable[[], str] | None = None  # required for a source stage to be cacheable
     ignore: tuple[str, ...] = ()  # captured names deliberately left out of the identity (they cannot change a result)
+    side: tuple[str, ...] = ()  # named side outputs, read downstream as `<name>.<side>`
     captured_hash: str = field(init=False, default="")
     code_hash: str = field(init=False, default="")
 
     def __post_init__(self) -> None:
+        bad = [x for x in self.side if not _SIDE_NAME.match(x)]
+        if bad or "." in self.name:
+            raise ValueError(f"stage {self.name!r}: names may not contain '.', side outputs must be identifiers {bad}")
         values = captured(self.fn, self.ignore)
         try:
             digest = spec_hash(values) if values else ""
@@ -244,12 +271,14 @@ class Stage:
     def key(self, input_refs: Mapping[str, str], fingerprint: str = "") -> str:
         parts = [self.name, str(self.version), spec_hash(self.spec), fingerprint, f"code={self.code_hash}"]
         parts += [f"captured={self.captured_hash}"] if self.captured_hash else []
+        parts += [f"side={','.join(self.side)}"] if self.side else []
         parts += [f"{k}={input_refs[k]}" for k in sorted(input_refs)]
         return hashlib.sha256("\x1f".join(parts).encode()).hexdigest()
 
     def plan_key(self, input_plan_keys: Mapping[str, str], fingerprint: str = "") -> str:
         parts = ["plan", self.name, str(self.version), spec_hash(self.spec), fingerprint, f"code={self.code_hash}"]
         parts += [f"captured={self.captured_hash}"] if self.captured_hash else []
+        parts += [f"side={','.join(self.side)}"] if self.side else []
         parts += [f"{k}={input_plan_keys[k]}" for k in sorted(input_plan_keys)]
         return hashlib.sha256("\x1f".join(parts).encode()).hexdigest()
 
@@ -262,6 +291,7 @@ class StageResult:
     output: str
     reason: str
     seconds: float = 0.0
+    side: dict[str, str] = field(default_factory=dict[str, str])  # side output name → artifact reference
 
 
 @dataclass
@@ -312,17 +342,19 @@ class Pipeline:
         holds the fingerprint stat cache. Both are site settings: they never enter a key or the signature."""
         self.stages = {s.name: s for s in stages}
         for s in self.stages.values():
-            missing = [i for i in s.inputs if i not in self.stages]
+            missing = [i for i in s.inputs if not self._known(i)]
             if missing:
-                raise KeyError(f"stage {s.name!r} depends on unknown stage(s) {missing}")
+                raise KeyError(f"stage {s.name!r} depends on unknown stage(s) or side output(s) {missing}")
+        graph = {n: tuple(dict.fromkeys(parent(i) for i in s.inputs)) for n, s in self.stages.items()}
         try:
-            self.order = list(TopologicalSorter({n: s.inputs for n, s in self.stages.items()}).static_order())
+            self.order = list(TopologicalSorter(graph).static_order())
         except CycleError as exc:
             raise ValueError(f"pipeline has a cycle: {exc.args[1]}") from exc
         self.root = Path(root)
         self.data: dict[str, Path] = {k: Path(v) for k, v in (data or {}).items()}
         self.ledger_path = self.root / "ledger.jsonl"  # the study's trials and holdout opening
         self.workers = 1  # worker processes stages may use (a site setting, never in a key)
+        self.judged: tuple[Headline, ...] = ()  # the books a run charges to the ledger, one entry each
         self.cache = StatCache(Path(cache)) if cache is not None else None
         if store is None:
             self.store = ArtifactStore(self.root / "store")
@@ -330,6 +362,10 @@ class Pipeline:
         else:
             self.store = ArtifactStore(Path(store))
             self.manifest = Manifest(Path(store) / "manifest.jsonl", shared=True)
+
+    def _known(self, ref: str) -> bool:
+        name, _, side = ref.partition(".")
+        return name in self.stages and (not side or side in self.stages[name].side)
 
     def rebase(
         self,
@@ -349,20 +385,21 @@ class Pipeline:
             cache=cache if cache is not None else (self.cache.directory if self.cache else None),
         )
         p.workers = self.workers
+        p.judged = self.judged
         return p
 
     def _needed(self, targets: Iterable[str] | None) -> list[str]:
         if targets is None:
             return self.order
         need: set[str] = set()
-        stack = list(targets)
+        stack = [parent(t) for t in targets]
         while stack:
             n = stack.pop()
             if n not in self.stages:
                 raise KeyError(f"unknown stage {n!r}")
             if n not in need:
                 need.add(n)
-                stack.extend(self.stages[n].inputs)
+                stack.extend(parent(i) for i in self.stages[n].inputs)
         return [n for n in self.order if n in need]
 
     def _fingerprints(self, names: Iterable[str]) -> dict[str, str]:
@@ -382,20 +419,26 @@ class Pipeline:
         plan_keys: dict[str, str] = {}
         for name in needed:
             stage = self.stages[name]
-            plan_keys[name] = stage.plan_key({i: plan_keys[i] for i in stage.inputs}, fps.get(name, ""))
+            ins = {
+                i: plan_keys[i] if "." not in i else f"{plan_keys[parent(i)]}.{i.partition('.')[2]}"
+                for i in stage.inputs
+            }
+            plan_keys[name] = stage.plan_key(ins, fps.get(name, ""))
         digest = hashlib.sha256("\x1f".join(f"{n}={plan_keys[n]}" for n in sorted(plan_keys)).encode()).hexdigest()
         return Signature(digest, plan_keys, fps)
 
-    def _decide(self, stage: Stage, key: str) -> tuple[bool, str, str | None]:
-        """(reuse?, why, stored output) — the one rule both run() and plan() apply."""
+    def _decide(self, stage: Stage, key: str) -> tuple[bool, str, str | None, dict[str, str]]:
+        """(reuse?, why, stored output, stored side outputs) — the one rule both run() and plan() apply."""
         rec = self.manifest.lookup(key)
         if not stage.inputs and stage.fingerprint is None:
-            return False, "source stage without a fingerprint: always runs", None
+            return False, "source stage without a fingerprint: always runs", None, {}
         if rec is None:
-            return False, "no record for this key (new, or an input / spec / version changed)", None
+            return False, "no record for this key (new, or an input / spec / version changed)", None, {}
         if not self.store.has(rec.output):
-            return False, "record exists but its output is missing from the store", None
-        return True, "inputs, spec and version unchanged", rec.output
+            return False, "record exists but its output is missing from the store", None, {}
+        if set(rec.side) != set(stage.side) or not all(self.store.has(r) for r in rec.side.values()):
+            return False, "record exists but a side output is missing from the store", None, {}
+        return True, "inputs, spec and version unchanged", rec.output, dict(rec.side)
 
     def plan(self, targets: Iterable[str] | None = None) -> list[PlanItem]:
         """What run() would do, without running anything.
@@ -414,9 +457,10 @@ class Pipeline:
                 items.append(PlanItem(name, "upstream", None, f"waits on re-running input(s): {', '.join(pending)}"))
                 continue
             key = stage.key({i: refs[i] for i in stage.inputs}, fps.get(name, ""))
-            reuse, why, out = self._decide(stage, key)
+            reuse, why, out, side = self._decide(stage, key)
             if reuse and out is not None:
                 refs[name] = out
+                refs |= {f"{name}.{k}": v for k, v in side.items()}
             items.append(PlanItem(name, "hit" if reuse else "run", key, why))
         return items
 
@@ -468,6 +512,7 @@ class Pipeline:
             record |= {"status": "ok"}
             if charge:
                 self._record_trial(report, targets, reason, meta, Headline.parse(headline))
+                self._record_books(report, reason, meta)
             log.emit(
                 "run_finished",
                 status="ok",
@@ -480,6 +525,7 @@ class Pipeline:
                 "finished_at": dt.datetime.now(dt.UTC).isoformat(timespec="seconds"),
                 "results": {
                     n: {"status": r.status, "key": r.key, "output": r.output, "seconds": round(r.seconds, 4)}
+                    | ({"side": r.side} if r.side else {})
                     for n, r in report.results.items()
                 },
             }
@@ -502,20 +548,7 @@ class Pipeline:
         trial_key: str | None = None
         if headline is not None and headline.stage in report.results:
             trial_key = report.results[headline.stage].key
-            out = self.store.get(report.results[headline.stage].output)
-            try:
-                numbers = {
-                    "sharpe": float(dig(out, headline.sharpe)),
-                    "n_obs": int(dig(out, headline.n_obs)),
-                    "periods": headline.periods,
-                }
-                if headline.daily is not None:
-                    from chairlift.evaluate.deflated import moments
-
-                    x = [float(d[headline.value]) for d in dig(out, headline.daily)]
-                    numbers["skew"], numbers["kurtosis"] = moments(x)
-            except (KeyError, TypeError, ValueError):
-                numbers = None
+            numbers = self._numbers(self.store.get(report.results[headline.stage].output), headline)
         m = dict(meta or {})
         Ledger(self.ledger_path).record_trial(
             signature=report.signature,
@@ -526,6 +559,43 @@ class Pipeline:
             sweep=m.get("sweep"),
             trial_key=trial_key,
         )
+
+    def _numbers(self, out: Any, headline: Headline) -> dict[str, Any] | None:
+        """The headline numbers of one stage output: Sharpe, observations, and the moments of its daily series."""
+        try:
+            numbers: dict[str, Any] = {
+                "sharpe": float(dig(out, headline.sharpe)),
+                "n_obs": int(dig(out, headline.n_obs)),
+                "periods": headline.periods,
+            }
+            if headline.daily is not None:
+                from chairlift.evaluate.deflated import moments
+
+                x = [float(d[headline.value]) for d in dig(out, headline.daily)]
+                numbers["skew"], numbers["kurtosis"] = moments(x)
+        except (KeyError, TypeError, ValueError):
+            return None
+        return numbers
+
+    def _record_books(self, report: RunReport, reason: str, meta: Mapping[str, Any] | None) -> None:
+        """Charge every judged book this run built or reused, once per book (its stage key and where its number is
+        read): the count a deflated statistic must use, whatever the run's headline."""
+        led = Ledger(self.ledger_path)
+        params = dict((meta or {}).get("params", {}))
+        for h in self.judged:
+            res = report.results.get(h.stage)
+            if res is None:
+                continue
+            book_key = hashlib.sha256(f"{res.key}|{h.sharpe}".encode()).hexdigest()
+            led.record_book(
+                book_key=book_key,
+                stage=h.stage,
+                family=h.family,
+                run_id=report.run_id,
+                params=params,
+                reason=reason,
+                headline=self._numbers(self.store.get(res.output), h),
+            )
 
     def _new_run_id(self, started: dt.datetime, signature: str) -> str:
         """`<UTC time to the microsecond>Z-<signature[:12]>`; unique within this root even for back-to-back runs."""
@@ -541,11 +611,12 @@ class Pipeline:
             stage = self.stages[name]
             input_refs = {i: refs[i] for i in stage.inputs}
             key = stage.key(input_refs, sig.fingerprints.get(name, ""))
-            reuse, why, out = self._decide(stage, key)
+            reuse, why, out, side = self._decide(stage, key)
             log.emit("stage_started", stage=name, key=key, will="reuse" if reuse else "run", reason=why)
             if reuse and out is not None:
                 refs[name] = out
-                report.results[name] = StageResult(name, "hit", key, out, why)
+                refs |= {f"{name}.{k}": v for k, v in side.items()}
+                report.results[name] = StageResult(name, "hit", key, out, why, side=side)
                 log.emit("stage_finished", stage=name, status="hit", key=key, output=out, seconds=0.0)
                 continue
             t0, c0 = time.perf_counter(), time.process_time()
@@ -558,6 +629,13 @@ class Pipeline:
                     bind_compute(self.workers),
                 ):
                     result = stage.fn(**kwargs) if stage.spec is None else stage.fn(stage.spec, **kwargs)
+                side: dict[str, str] = {}
+                if isinstance(result, Outputs) or stage.side:
+                    if not isinstance(result, Outputs) or set(result.side) != set(stage.side):
+                        got = sorted(result.side) if isinstance(result, Outputs) else "no side outputs"
+                        raise TypeError(f"stage {name!r} declares side outputs {list(stage.side)} but returned {got}")
+                    side = {k: self.store.put(result.side[k]) for k in stage.side}
+                    result = result.value
                 ref = self.store.put(result)
             except BaseException as exc:
                 log.emit(
@@ -577,6 +655,7 @@ class Pipeline:
                 status="ran",
                 key=key,
                 output=ref,
+                **({"side": side} if side else {}),
                 seconds=round(seconds, 4),
                 cpu_seconds=round(time.process_time() - c0, 4),
                 peak_rss_mb=round(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024, 1),
@@ -592,9 +671,11 @@ class Pipeline:
                 output=ref,
                 code=code_identity(),
                 reason=reason or why,
+                side=side,
             )
             refs[name] = ref
-            report.results[name] = StageResult(name, "ran", key, ref, why, seconds)
+            refs |= {f"{name}.{k}": v for k, v in side.items()}
+            report.results[name] = StageResult(name, "ran", key, ref, why, seconds, side=side)
 
     def _record(
         self,
@@ -644,7 +725,10 @@ class Pipeline:
         os.replace(tmp, path)
 
     def load(self, name: str, report: RunReport) -> Any:
-        return self.store.get(report.results[name].output)
+        """A stage's output, or with `<stage>.<side>` one of its side outputs."""
+        stage, _, side = name.partition(".")
+        r = report.results[stage]
+        return self.store.get(r.side[side] if side else r.output)
 
 
 @functools.cache

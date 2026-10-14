@@ -89,7 +89,7 @@ In a study repository the factory would be a module, `my_study.study:pipeline`, 
 
 ## Stages
 
-`Stage(name, fn, inputs=(), spec=None, version=1, fingerprint=None)`
+`Stage(name, fn, inputs=(), spec=None, version=1, fingerprint=None, ignore=(), side=())`
 
 - **`fn`** is called as `fn(spec, **inputs)` when the stage has a spec, and `fn(**inputs)` otherwise. Inputs are
   passed by stage name, so the parameter names must match the input stage names.
@@ -104,6 +104,11 @@ In a study repository the factory would be a module, `my_study.study:pipeline`, 
 - **`version`**: bump it whenever the stage computes something different without its spec changing (a bug fix, a new
   formula). Every cached result built from the old meaning is rebuilt. Never change what a released stage computes
   without bumping it.
+- **Side outputs**: `side=("models",)` declares named second products. The function then returns
+  `Outputs(value, models=...)`. Each side output is stored beside the main output under the same stage key and
+  rebuilt exactly when the stage is. Downstream it is the input `<stage>.<name>`, read through `**inputs` because the
+  name holds a dot, and `chairlift show STUDY <stage>.<name>` prints it. A walk-forward fit keeps each fold's model
+  this way (`fit_<model>.models`).
 
 ## Specs
 
@@ -139,9 +144,9 @@ identity is the alias and relative path, never the resolved directory.
 Inside a stage, `chairlift.run.events` writes to the current run's event stream, tagged with the stage name:
 
 ```python
-events.progress(done, total, "fold 3 of 10")   # the live view's bar and detail columns
-events.metric("oos_ic", 0.031, fold=3)          # name, value, any dimensions; `compare` diffs the last values
-events.warning("212 rows dropped: iv < 7%")     # shown in yellow; does not fail the stage
+events.progress(done, total, "fold 3 of 10")  # the live view's bar and detail columns
+events.metric("oos_ic", 0.031, fold=3)  # name, value, any dimensions; `compare` diffs the last values
+events.warning("212 rows dropped: iv < 7%")  # shown in yellow; does not fail the stage
 ```
 
 All three are no-ops outside a run, so the same function works in a notebook or a test. They never enter a key or an
@@ -170,7 +175,7 @@ def test_study_runs_and_is_cached(tmp_path):
     make_tiny_prices().write_parquet(data / "a.parquet")
     pipe = pipeline(tmp_path / "root").rebase(tmp_path / "root", data={"vendor": tmp_path / "vendor"})
     assert pipe.run().ran() == ["prices", "features", "book"]
-    assert pipe.run().ran() == []                                  # every key unchanged: all hits
+    assert pipe.run().ran() == []  # every key unchanged: all hits
 ```
 
 `Pipeline(stages, root, store=None, *, data=None, cache=None)`:

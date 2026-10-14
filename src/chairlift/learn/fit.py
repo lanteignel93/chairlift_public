@@ -16,8 +16,9 @@ Output: one row per (keys, fold, is_train) with `pred`; test rows are the out-of
 from __future__ import annotations
 
 import datetime as dt
+import math
 from collections.abc import Sequence
-from typing import Any
+from typing import Any, cast
 
 import polars as pl
 
@@ -151,6 +152,75 @@ def fit_walk_forward(
         events.metric("n_inputs", float(r[1]["n_inputs"]), fold=r[1]["test_year"])
     events.progress(len(folds), len(folds), f"{len(folds)} folds fitted")
     return pl.concat(preds), infos
+
+
+def fold_models(infos: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Each fold's description as plain JSON (a stage output): what the fold chose and fitted, by test year. NaN and
+    infinite values become null; numpy scalars become Python numbers."""
+
+    def plain(v: object) -> Any:
+        if isinstance(v, dict):
+            return {str(k): plain(x) for k, x in cast("dict[object, object]", v).items()}
+        if isinstance(v, list | tuple):
+            return [plain(x) for x in cast("Sequence[object]", v)]
+        if v is None or isinstance(v, bool | str | int):
+            return v
+        if isinstance(v, float):
+            return float(v) if math.isfinite(v) else None
+        item = getattr(v, "item", None)  # a numpy scalar
+        return plain(item()) if callable(item) else str(v)
+
+    return [cast("dict[str, Any]", plain(i)) for i in infos]
+
+
+def _weights(info: dict[str, Any]) -> dict[str, float]:
+    """One fold's fitted weight per input: a ridge's standardised coefficient, a composite's weight, LightGBM's mean
+    gain (unsigned), a rule's chosen input (1)."""
+    d = cast("dict[str, Any]", info.get("model") or {})
+    names = [str(n) for n in cast("list[Any]", info.get("model_inputs") or info.get("inputs") or [])]
+    kind = d.get("kind")
+    if kind == "ridge":
+        coef = cast("list[float | None]", d["coef_standardised"])
+        return {n: float(c) for n, c in zip(names, coef, strict=True) if c is not None}
+    if kind == "composite":
+        weights = cast("dict[str, float | None]", d["weights"])
+        return {str(n): float(c) for n, c in weights.items() if c is not None}
+    if kind == "lightgbm":
+        gain = cast("list[float | None]", d["gain_importance_mean"])
+        return {n: float(c) for n, c in zip(names, gain, strict=True) if c is not None}
+    if kind == "rule":
+        j = d.get("input", -1)
+        return {names[j]: 1.0} if isinstance(j, int) and 0 <= j < len(names) else {}
+    return {}
+
+
+def stability(models: Sequence[dict[str, Any]]) -> dict[str, Any]:
+    """How stable a walk-forward model is across its folds, input by input: in how many folds the input has a weight,
+    its mean and mean absolute weight, and for a signed model the share of folds that agree with the majority sign. A
+    weight that flips sign from fold to fold is noise the model fitted, whatever the out-of-sample number says."""
+    kinds = {str(cast("dict[str, Any]", m.get("model") or {}).get("kind")) for m in models}
+    signed = kinds <= {"ridge", "composite"}
+    per = [_weights(m) for m in models]
+    names = sorted({n for w in per for n in w})
+    rows: dict[str, dict[str, Any]] = {}
+    for n in names:
+        v = [w[n] for w in per if n in w]
+        pos, neg = sum(x > 0 for x in v), sum(x < 0 for x in v)
+        rows[n] = {
+            "folds": len(v),
+            "mean": sum(v) / len(v),
+            "mean_abs": sum(abs(x) for x in v) / len(v),
+            "sign_agreement": max(pos, neg) / len(v) if signed and (pos or neg) else None,
+        }
+    order = sorted(rows, key=lambda n: -rows[n]["mean_abs"])
+    agree = [r["sign_agreement"] for r in rows.values() if r["sign_agreement"] is not None]
+    return {
+        "kind": ",".join(sorted(kinds)),
+        "folds": len(models),
+        "is_ic": {str(m.get("test_year")): m.get("is_ic") for m in models},
+        "share_inputs_sign_stable": sum(a == 1.0 for a in agree) / len(agree) if agree else None,
+        "inputs": {n: rows[n] for n in order},
+    }
 
 
 def zscore_ensemble(

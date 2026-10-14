@@ -20,7 +20,9 @@ _EXPORTS: dict[str, str] = {
     "Ensemble": "chairlift.study.build",
     "CrossSectionBook": "chairlift.study.build",
     "TimeSeriesBook": "chairlift.study.build",
+    "PathBook": "chairlift.study.build",
     "Stage": "chairlift.run.dag",
+    "Outputs": "chairlift.run.dag",
     "Pipeline": "chairlift.run.dag",
     "spec": "chairlift.core.spec",
     "added": "chairlift.core.spec",
@@ -46,6 +48,7 @@ _EXPORTS: dict[str, str] = {
     # books and evaluation
     "QuantileBook": "chairlift.book.quantile",
     "SignalBook": "chairlift.book.timeseries",
+    "PathSizing": "chairlift.book.path",
     "DailyStatsSpec": "chairlift.evaluate.daily",
     "daily_stats": "chairlift.evaluate.daily",
     "paired_sharpe_diff": "chairlift.evaluate.daily",
@@ -62,6 +65,7 @@ _EXPORTS: dict[str, str] = {
     "guard": "chairlift.ledger.holdout",
     "with_holdout": "chairlift.ledger.holdout",
     "Ledger": "chairlift.ledger.trials",
+    "Headline": "chairlift.ledger.trials",
     # search
     "SearchSpace": "chairlift.search.space",
     "pbo": "chairlift.search.select",
@@ -78,11 +82,15 @@ __all__ = [  # literal, so type checkers see it; tests/docs checks it equals _EX
     "Ensemble",
     "FeatureSet",
     "FitSpec",
+    "Headline",
     "Holdout",
     "Interactions",
     "Ledger",
     "LightGBMSpec",
     "Model",
+    "Outputs",
+    "PathBook",
+    "PathSizing",
     "Pipeline",
     "PowerSpec",
     "QuantileBook",
@@ -134,6 +142,7 @@ def __dir__() -> list[str]:
 
 
 if TYPE_CHECKING:
+    from chairlift.book.path import PathSizing
     from chairlift.book.quantile import QuantileBook
     from chairlift.book.timeseries import SignalBook
     from chairlift.core.spec import added, spec, spec_hash
@@ -148,8 +157,8 @@ if TYPE_CHECKING:
     from chairlift.learn.selection import ClusterSelection
     from chairlift.learn.transforms import PCA, Interactions, Winsorize
     from chairlift.ledger.holdout import Holdout, guard, with_holdout
-    from chairlift.ledger.trials import Ledger
-    from chairlift.run.dag import Pipeline, Stage
+    from chairlift.ledger.trials import Headline, Ledger
+    from chairlift.run.dag import Outputs, Pipeline, Stage
     from chairlift.schedule.walkforward import WalkForward, make_folds
     from chairlift.search.select import pbo, walk_forward_selection
     from chairlift.search.space import SearchSpace
@@ -158,6 +167,7 @@ if TYPE_CHECKING:
         Ensemble,
         FeatureSet,
         Model,
+        PathBook,
         PowerSpec,
         Source,
         Study,

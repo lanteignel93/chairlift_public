@@ -184,7 +184,8 @@ Open the study's holdout. Irreversible: the next runs read holdout rows, and the
 chairlift ledger [OPTIONS]
 ```
 
-The study's trials (one per signature) and the deflated Sharpe of the best, given how many were tried.
+The study's trials (one per signature) and the deflated Sharpe of the best, given how many were tried; with
+judged books, each family of books deflated over its own count.
 
 | option | meaning |
 |---|---|
@@ -338,7 +339,8 @@ walk-forward selection (no hindsight), probability of backtest overfitting, robu
 chairlift show [OPTIONS] STUDY STAGE
 ```
 
-Print a stage's stored output (building it and its ancestors first if needed).
+Print a stage's stored output (building it and its ancestors first if needed); `STAGE.SIDE` prints one of its
+side outputs (a fit's `models`).
 
 | option | meaning |
 |---|---|

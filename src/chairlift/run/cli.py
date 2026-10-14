@@ -349,17 +349,21 @@ def plan(
 def show(
     ctx: Ctx, study: str, stage: str, root: Path | None, name: str | None, sets: tuple[str, ...], rows: int
 ) -> None:
-    """Print a stage's stored output (building it and its ancestors first if needed)."""
+    """Print a stage's stored output (building it and its ancestors first if needed); `STAGE.SIDE` prints one of its
+    side outputs (a fit's `models`)."""
     b = _build(ctx, study, root, sets, name)
     pipe = b.pipe
-    if stage not in pipe.stages:
-        raise click.BadParameter(f"unknown stage {stage!r}; stages: {', '.join(pipe.order)}", param_hint="STAGE")
-    report = pipe.run([stage], reason=f"show {stage}", meta=b.meta(ctx), charge=False)
+    base, _, side = stage.partition(".")
+    if base not in pipe.stages or (side and side not in pipe.stages[base].side):
+        known = [*pipe.order, *(f"{n}.{x}" for n in pipe.order for x in pipe.stages[n].side)]
+        raise click.BadParameter(f"unknown stage {stage!r}; stages: {', '.join(known)}", param_hint="STAGE")
+    report = pipe.run([base], reason=f"show {stage}", meta=b.meta(ctx), charge=False)
     out = pipe.load(stage, report)
     if isinstance(out, pl.DataFrame):
+        res = report.results[base]
         with pl.Config(tbl_rows=rows, tbl_cols=-1):
             click.echo(out.head(rows))
-        click.echo(f"{out.height} rows × {out.width} columns · {report.results[stage].output}")
+        click.echo(f"{out.height} rows × {out.width} columns · {res.side[side] if side else res.output}")
     else:
         click.echo(json.dumps(out, indent=1))
 
@@ -755,8 +759,12 @@ def rerun(
         report = b.pipe.run(targets, reason=f"rerun of {rec['run_id']}", meta=b.meta(ctx) | {"rerun_of": rec["run_id"]})
         rows: list[dict[str, Any]] = []
         for n, r in report.results.items():
-            then = rec.get("results", {}).get(n, {}).get("output")
+            was = rec.get("results", {}).get(n, {})
+            then = was.get("output")
             rows.append({"stage": n, "recorded": then, "reproduced": r.output, "match": then == r.output})
+            for k in sorted(set(r.side) | set(was.get("side", {}))):
+                then_k, now_k = was.get("side", {}).get(k), r.side.get(k)
+                rows.append({"stage": f"{n}.{k}", "recorded": then_k, "reproduced": now_k, "match": then_k == now_k})
     finally:
         if not keep and into is None:
             shutil.rmtree(fresh, ignore_errors=True)
@@ -767,7 +775,7 @@ def rerun(
         t = _table("stage", "recorded", "reproduced", "")
         for r in rows:
             mark = "[green]identical[/]" if r["match"] else "[red]DIFFERS[/]"
-            t.add_row(r["stage"], str(r["recorded"])[:20], r["reproduced"][:20], mark)
+            t.add_row(r["stage"], str(r["recorded"])[:20], str(r["reproduced"])[:20], mark)
         con = _console()
         con.print(t)
         verdict = "reproduced bit for bit" if ok else "NOT reproduced"
@@ -867,9 +875,10 @@ def compare(ctx: Ctx, run_a: str, run_b: str, root: Path | None, show_all: bool,
         add("spec", n, (sa.get("spec_hash") or "—")[:12], (sb.get("spec_hash") or "—")[:12])
         if sa.get("fingerprint") or sb.get("fingerprint"):
             add("data", n, str(sa.get("fingerprint", "—"))[:20], str(sb.get("fingerprint", "—"))[:20])
-        oa = a.get("results", {}).get(n, {}).get("output") or "—"
-        ob = b.get("results", {}).get(n, {}).get("output") or "—"
-        add("output", n, oa[:20], ob[:20])
+        ra, rb = a.get("results", {}).get(n, {}), b.get("results", {}).get(n, {})
+        add("output", n, (ra.get("output") or "—")[:20], (rb.get("output") or "—")[:20])
+        for k in sorted(set(ra.get("side", {})) | set(rb.get("side", {}))):
+            add("output", f"{n}.{k}", ra.get("side", {}).get(k, "—")[:20], rb.get("side", {}).get(k, "—")[:20])
     ea, eb = a.get("environment", {}), b.get("environment", {})
     add("env", "hash", str(ea.get("hash", "—"))[:12], str(eb.get("hash", "—"))[:12])
     add("env", "python", ea.get("python"), eb.get("python"))
@@ -912,7 +921,8 @@ def _study_root(ctx: Ctx, root: Path | None, study_name: str | None) -> Path:
 @json_opt
 @click.pass_obj
 def ledger(ctx: Ctx, root: Path | None, study_name: str | None, as_json: bool) -> None:
-    """The study's trials (one per signature) and the deflated Sharpe of the best, given how many were tried."""
+    """The study's trials (one per signature) and the deflated Sharpe of the best, given how many were tried; with
+    judged books, each family of books deflated over its own count."""
     from chairlift.evaluate.deflated import deflated_sharpe
     from chairlift.ledger.trials import Ledger
 
@@ -920,6 +930,23 @@ def ledger(ctx: Ctx, root: Path | None, study_name: str | None, as_json: bool) -
     trials = led.trials()
     if not trials:
         raise click.UsageError(f"no trials recorded in {led.path}")
+    families: dict[str, list[dict[str, Any]]] = {}
+    for bk in led.books():
+        if bk.get("headline"):
+            families.setdefault(str(bk.get("family")), []).append(bk)
+    by_family: dict[str, Any] = {}
+    for fam, bks in families.items():
+        hs = [bk["headline"] for bk in bks]
+        top = max(hs, key=lambda x: x["sharpe"])
+        d = deflated_sharpe(
+            [x["sharpe"] for x in hs],
+            n_obs=min(x["n_obs"] for x in hs),
+            periods=hs[0]["periods"],
+            skew=top.get("skew", 0.0),
+            kurt=top.get("kurtosis", 3.0),
+        )
+        best = bks[int(d["best"])]
+        by_family[fam] = d | {"best_stage": best["stage"], "best_params": best["params"], "best_run": best["run_id"]}
     scored = [t for t in trials if t.get("headline")]
     dsr = None
     if scored:
@@ -935,7 +962,8 @@ def ledger(ctx: Ctx, root: Path | None, study_name: str | None, as_json: bool) -
         dsr["best_run"] = scored[dsr["best"]]["run_id"]
     opened = led.holdout_opened()
     if as_json:
-        click.echo(json.dumps({"trials": trials, "deflated": dsr, "holdout_open": opened}, indent=1, default=str))
+        out = {"trials": trials, "deflated": dsr, "holdout_open": opened, "books": led.books(), "families": by_family}
+        click.echo(json.dumps(out, indent=1, default=str))
         return
     t = _table("at", "signature", "sharpe", "params", "reason")
     for tr in trials:
@@ -956,6 +984,12 @@ def ledger(ctx: Ctx, root: Path | None, study_name: str | None, as_json: bool) -
             f"best Sharpe {dsr['best_sharpe']:+.3f} (run {dsr['best_run']}) · expected max of {dsr['n_trials']} null"
             f" trials {dsr['expected_max_sharpe_null']:+.3f} · deflated Sharpe probability {dsr['dsr']:.3f}"
             f" (vs zero {dsr['psr_vs_zero']:.3f})"
+        )
+    for fam, d in sorted(by_family.items()):
+        con.print(
+            f"books judged on {escape(fam)}: {d['n_trials']} · best {d['best_sharpe']:+.3f} ({d['best_stage']},"
+            f" {escape(json.dumps(d['best_params']))}) · expected max of {d['n_trials']} null books"
+            f" {d['expected_max_sharpe_null']:+.3f} · deflated probability {d['dsr']:.3f}"
         )
 
 

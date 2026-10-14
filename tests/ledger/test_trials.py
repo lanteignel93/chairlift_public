@@ -47,3 +47,22 @@ def test_a_torn_line_is_skipped(tmp_path: Path):
     with led.path.open("a") as fh:
         fh.write('{"kind": "tri')
     assert len(led.trials()) == 1
+
+
+def test_books_are_charged_once_each_whatever_run_reaches_them(tmp_path):
+    from chairlift.ledger.trials import Ledger
+
+    led = Ledger(tmp_path / "ledger.jsonl")
+    h = {"sharpe": 0.4, "n_obs": 1500, "periods": 252}
+    first = led.record_book(
+        book_key="k1", stage="eval_a", family="gain over constant", run_id="r1", params={}, reason="", headline=h
+    )
+    again = led.record_book(
+        book_key="k1", stage="eval_a", family="gain over constant", run_id="r2", params={}, reason="", headline=h
+    )
+    other = led.record_book(
+        book_key="k2", stage="eval_b", family="gain over constant", run_id="r2", params={}, reason="", headline=h
+    )
+    assert first is not None and again is None and other is not None
+    assert [b["book_key"] for b in led.books()] == ["k1", "k2"] and led.trials() == []  # books are not run trials
+    assert led.books()[0]["after_holdout_open"] is False
