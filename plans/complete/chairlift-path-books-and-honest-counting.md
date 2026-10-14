@@ -1,8 +1,9 @@
 # chairlift on path-marked books: native overlapping-entry books, kept models, honest counts, outcome-free seals
 
-**Status:** actionable
+**Status:** complete
 **Prepared:** 2026-10-14
 **Owner:** Laurent Lanteigne
+**Completed:** 2026-10-14, chairlift 0.3.0 (merged to main on Laurent's go)
 **Buy-in:** Laurent, 2026-10-14 ("1 and 2 and then let's see how well the ridge with ML rank sizing does on the dev?"; mogul log M-522)
 
 ---
@@ -121,6 +122,23 @@ The power stage learns the overlap: the effective number of independent outcomes
 the mean holding period in entry steps (or a block-bootstrap estimate of it). The power report then states, per fold,
 inputs against independent outcomes, and warns when the ratio passes a declared threshold (the client's 29 inputs on 8
 independent months would have been flagged before any fit).
+
+## Outcome (2026-10-14)
+
+- **Delivered in 0.3.0:** A (outcome-free seals), B (kept models, through side outputs), E with C (the calendar and
+  the path book), and D's ledger change (one entry per judged book, deflated within its family).
+- **Acceptance:**
+  - The mogul client, ported, reproduces its step-10 books to within 1.8e-15 (295 numbers; mogul log M-530).
+  - Its fold models equal `export_review.py`'s coefficients, except where the stale-day drop moved them.
+  - Re-running every step-10 experiment gave the honest count mechanically: 171 judged books, 92 of them judged on
+    their gain (M-532).
+- **Not in this plan's v1, left open:**
+  - F, power for overlapping outcomes. The re-judgement showed it reaches the deflated Sharpe too: on mogul the
+    candidate's DSR falls from 0.91 to 0.81 on the gain series' effective length (734 of 1,684 days).
+  - D's search integration (walk-forward selection and PBO on gains).
+  - The gate's refusal of an exit-date seal is a declaration (`early_exit`), not a detection.
+  - The page-review findings above.
+- **The public copy** gets these as one reviewed batch (decision 3), not yet replayed.
 
 ## Decisions at promotion (2026-10-14)
 

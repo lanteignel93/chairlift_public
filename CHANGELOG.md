@@ -3,7 +3,7 @@
 The public API is `chairlift.__all__` ([docs/guide/10-api.md](docs/guide/10-api.md)). Until 1.0 a minor version may
 change it; every change is listed here.
 
-## Unreleased (0.3.0)
+## 0.3.0 (2026-10-14)
 
 Overlapping trades marked along their paths (an option seller's book) become a first-class study shape, judged on its
 gain over a baseline, with honest counts. Built from what the mogul client had to work around (plan
