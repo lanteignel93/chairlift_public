@@ -23,6 +23,10 @@ bump and a CHANGELOG entry. Anything else is internal, even when importable.
   A position through time from a prediction (or a rule), against constant and rule baselines.
 - **`PathBook`** (class, `chairlift.study.build`) `(…)`  
   Overlapping trades marked along their paths, each sized by its model's prediction at entry, against baselines on the same entries (`book.path`). The gain over `benchmark` is what the study is judged on.
+- **`path_book_stage`** (function, `chairlift.study.build`) `(…)`  
+  The path book's evaluation of any prediction stage (`pred`: keys, pred, fold, is_train), the same stage a declared model gets. A client books its own predictions with it (a position policy, with `sizing` set to the `direct` rule) and counts the book with `Study(judged=(path_headline(name),))`.
+- **`path_headline`** (function, `chairlift.study.build`) `(stage: 'str', benchmark: 'str' = 'constant', periods: 'int' = 252) -> 'Headline'`  
+  Where a path book's verdict lives: its active series against the benchmark, in the family of that gain.
 
 ## `chairlift.run`
 

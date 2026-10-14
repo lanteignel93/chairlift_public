@@ -208,11 +208,7 @@ class Study:
         b = self.book
         out: list[Headline] = []
         if isinstance(b, PathBook):
-            fam = f"gain over {b.benchmark}"
-            out += [
-                Headline(f"eval_{n}", "active.sharpe", "active.n_days", self.stats.periods, "active.daily", "pnl", fam)
-                for n in names
-            ]
+            out += [path_headline(f"eval_{n}", b.benchmark, self.stats.periods) for n in names]
         elif isinstance(b, CrossSectionBook):
             out += [
                 Headline(f"eval_{n}", "ls.sharpe", "ls.n_days", self.stats.periods, "daily", "ls", "long-short")
@@ -248,13 +244,7 @@ class Study:
         names = self._evaluated()
         pred_stage = {m.name: f"fit_{m.name}" for m in self.models} | {e.name: f"ens_{e.name}" for e in self.ensembles}
         if isinstance(self.book, PathBook):
-            b = self.book
-            for n in names:
-                p = pred_stage[n]
-                ins = (b.trades, b.calendar, b.frame, p)
-                spec_ = _PathEval(stats=self.stats, sizing=b.sizing)
-                fn = _path_eval_stage(p, b.trades, b.calendar, b.frame, b.baselines, b.benchmark, b.outcome, b.flag)
-                out.append(Stage(f"eval_{n}", fn, ins, spec=spec_, side=("trades",)))
+            out += [path_book_stage(f"eval_{n}", pred_stage[n], self.book, self.stats) for n in names]
         elif isinstance(self.book, CrossSectionBook):
             b = self.book
             for n in names:
@@ -453,6 +443,24 @@ def _ts_eval_stage(
         return out
 
     return evaluate
+
+
+def path_book_stage(
+    name: str, pred: str, book: PathBook, stats: DailyStatsSpec, sizing: PathSizing | None = None
+) -> Stage:
+    """The path book's evaluation of any prediction stage (`pred`: keys, pred, fold, is_train), the same stage a
+    declared model gets. A client books its own predictions with it (a position policy, with `sizing` set to the
+    `direct` rule) and counts the book with `Study(judged=(path_headline(name),))`."""
+    fn = _path_eval_stage(
+        pred, book.trades, book.calendar, book.frame, book.baselines, book.benchmark, book.outcome, book.flag
+    )
+    spec_ = _PathEval(stats=stats, sizing=sizing or book.sizing)
+    return Stage(name, fn, (book.trades, book.calendar, book.frame, pred), spec=spec_, side=("trades",))
+
+
+def path_headline(stage: str, benchmark: str = "constant", periods: int = 252) -> Headline:
+    """Where a path book's verdict lives: its active series against the benchmark, in the family of that gain."""
+    return Headline(stage, "active.sharpe", "active.n_days", periods, "active.daily", "pnl", f"gain over {benchmark}")
 
 
 def _path_stats(d: pl.DataFrame, s: DailyStatsSpec) -> dict[str, Any]:

@@ -15,7 +15,7 @@ from chairlift.evaluate.daily import DailyStatsSpec
 from chairlift.learn.fit import FitSpec
 from chairlift.learn.models import RidgeSpec
 from chairlift.schedule.walkforward import WalkForward
-from chairlift.study.build import CrossSectionBook, Ensemble, FeatureSet, Model, Source, Study, TimeSeriesBook
+from chairlift.study.build import CrossSectionBook, Ensemble, FeatureSet, Model, PathBook, Source, Study, TimeSeriesBook
 from chairlift.verify.twins import CrossSectionTwin, TimeSeriesTwin, cross_section_twin, time_series_twin
 
 TWIN = CrossSectionTwin(names=60, dates=72)
@@ -251,3 +251,29 @@ def test_a_path_book_sizes_on_the_signal_and_is_judged_on_its_gain(tmp_path: Pat
 def test_a_path_book_refuses_a_calendar_that_misses_a_pnl_day(tmp_path: Path):
     with pytest.raises(ValueError, match="not on the trading calendar"):
         _path_study(drop_day=True).pipeline(tmp_path).run()
+
+
+def test_a_client_books_its_own_predictions_with_the_same_stage_and_counts_them(tmp_path: Path):
+    from chairlift.book.path import PathSizing
+    from chairlift.ledger.trials import Ledger
+    from chairlift.run.dag import Stage
+    from chairlift.study.build import path_book_stage, path_headline
+
+    base = _path_study()
+    assert isinstance(base.book, PathBook)
+
+    def flipped(fit_ridge: pl.DataFrame) -> pl.DataFrame:  # a client's own position: the ridge, sign flipped
+        return fit_ridge.with_columns(pl.col("pred") * -1)
+
+    s = dataclasses.replace(
+        base,
+        extra=[
+            Stage("policy", flipped, ("fit_ridge",)),
+            path_book_stage("book_policy", "policy", base.book, base.stats, PathSizing(rule="rank")),
+        ],
+        judged=(path_headline("book_policy"),),
+    )
+    p = s.pipeline(tmp_path)
+    r = p.run()
+    assert p.load("book_policy", r)["vs_constant"]["d_sharpe"] < 0 < p.load("eval_ridge", r)["vs_constant"]["d_sharpe"]
+    assert {b["stage"] for b in Ledger(tmp_path / "ledger.jsonl").books()} == {"eval_ridge", "book_policy"}
