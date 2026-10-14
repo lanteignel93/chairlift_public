@@ -127,6 +127,6 @@ def test_each_fold_s_model_is_kept_as_plain_json_and_its_stability_read():
     assert [m["test_year"] for m in models[:-1]] == [f["test_year"] for f in infos] and models[-1]["is_ic"] is None
     st = stability(models[:-1])
     assert st["kind"] == "ridge" and st["folds"] == len(infos)
-    top = next(iter(st["inputs"]))
-    assert top == "x" and st["inputs"]["x"]["sign_agreement"] == 1.0  # the planted signal keeps its sign every fold
-    assert all(r["folds"] == len(infos) for r in st["inputs"].values())
+    top = st["inputs"][0]  # ordered by mean absolute weight
+    assert top["input"] == "x" and top["sign_agreement"] == 1.0  # the planted signal keeps its sign every fold
+    assert all(r["folds"] == len(infos) for r in st["inputs"])

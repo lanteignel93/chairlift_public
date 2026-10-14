@@ -202,24 +202,27 @@ def stability(models: Sequence[dict[str, Any]]) -> dict[str, Any]:
     signed = kinds <= {"ridge", "composite"}
     per = [_weights(m) for m in models]
     names = sorted({n for w in per for n in w})
-    rows: dict[str, dict[str, Any]] = {}
+    rows: list[dict[str, Any]] = []
     for n in names:
         v = [w[n] for w in per if n in w]
         pos, neg = sum(x > 0 for x in v), sum(x < 0 for x in v)
-        rows[n] = {
-            "folds": len(v),
-            "mean": sum(v) / len(v),
-            "mean_abs": sum(abs(x) for x in v) / len(v),
-            "sign_agreement": max(pos, neg) / len(v) if signed and (pos or neg) else None,
-        }
-    order = sorted(rows, key=lambda n: -rows[n]["mean_abs"])
-    agree = [r["sign_agreement"] for r in rows.values() if r["sign_agreement"] is not None]
+        rows.append(
+            {
+                "input": n,
+                "folds": len(v),
+                "mean": sum(v) / len(v),
+                "mean_abs": sum(abs(x) for x in v) / len(v),
+                "sign_agreement": max(pos, neg) / len(v) if signed and (pos or neg) else None,
+            }
+        )
+    rows.sort(key=lambda r: -r["mean_abs"])  # a list: a stored JSON object would lose this order
+    agree = [r["sign_agreement"] for r in rows if r["sign_agreement"] is not None]
     return {
         "kind": ",".join(sorted(kinds)),
         "folds": len(models),
         "is_ic": {str(m.get("test_year")): m.get("is_ic") for m in models},
         "share_inputs_sign_stable": sum(a == 1.0 for a in agree) / len(agree) if agree else None,
-        "inputs": {n: rows[n] for n in order},
+        "inputs": rows,
     }
 
 
