@@ -387,3 +387,15 @@ mogul client worked around. The plan's proposals answer its open questions:
   judged on the active series (book minus benchmark), as timing books already are.
   - *Rejected:* deflating the paired Sharpe difference directly. The formula's √(T−1) scaling assumes one series's
     Sharpe, and the difference's standard error depends on the two books' correlation.
+
+## 2026-10-14 (later) — one Python minor version for local environments
+
+The mogul client's honest re-run ran in a worktree that `uv` synced with Python 3.13.5, while the main environment
+runs 3.12.3. The fold and fit stages took different keys between the two:
+- They reach a dataclass (`Fold`), whose generated code differs between minor versions.
+- The digest reads a module value (`__name__`) through it.
+
+Their outputs were byte-identical, so every book stage was a cache hit and no number moved. Pinned locally with
+`.python-version` (3.12); CI keeps its 3.12 / 3.13 / 3.14 matrix.
+- *Rejected:* excluding module values reached through generated code from the digest. That would hide a real
+  dependence to save a re-run.

@@ -3,6 +3,15 @@
 The public API is `chairlift.__all__` ([docs/guide/10-api.md](docs/guide/10-api.md)). Until 1.0 a minor version may
 change it; every change is listed here.
 
+## Unreleased
+
+- **`.python-version` pins local environments to 3.12** (CI still tests 3.12, 3.13 and 3.14). A worktree synced
+  without a pin got 3.13. Stages that reach a dataclass (folds, fits) then took new keys: dataclass-generated code
+  differs between Python minor versions, and the digest reads a module value through it. Their outputs were
+  byte-identical, so every downstream stage was a cache hit, but each such stage re-ran once. Keys are now stable
+  across this repository's local environments; across Python minor versions they still move, and the environment
+  hash records why.
+
 ## 0.3.0 (2026-10-14)
 
 Overlapping trades marked along their paths (an option seller's book) become a first-class study shape, judged on its
