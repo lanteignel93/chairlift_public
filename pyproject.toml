@@ -10,7 +10,7 @@ dependencies = [
     "msgspec>=0.22",
     "numpy>=1.26",
     "platformdirs>=4.12",
-    "polars>=1.21,<2",
+    "polars>=1.21,<3",
     "rich>=13",
     "tomli-w>=1.2",
 ]
